@@ -8,12 +8,11 @@ import pandas as pd
 
 @dataclass(frozen=True, slots=True)
 class Result:
-    """Summary statistics for a single backtest run.
+    """单次回测的汇总统计结果。
 
-    Field names mirror the columns produced by `backtesting.py`'s
-    `Backtest.run()` output (see the `[%]` / `[$]` suffixes in the
-    original), but are renamed to snake_case and given concrete types
-    instead of raw strings.
+    只保留"净值曲线级别"的指标: 只要有一条逐日净值序列(不管是单标的
+    事件驱动策略跑出来的, 还是截面多资产向量化策略跑出来的)就能算,
+    跟回测范式无关
     """
 
     # --- Timing ---------------------------------------------------
@@ -46,20 +45,6 @@ class Result:
     max_drawdown_duration: timedelta  # Max. Drawdown Duration
     avg_drawdown_duration: timedelta  # Avg. Drawdown Duration
 
-    # --- Trades ------------------------------------------------------
-    n_trades: int                     # # Trades
-    win_rate_pct: float               # Win Rate [%]
-    best_trade_pct: float             # Best Trade [%]
-    worst_trade_pct: float            # Worst Trade [%]
-    avg_trade_pct: float              # Avg. Trade [%]
-    max_trade_duration: timedelta     # Max. Trade Duration
-    avg_trade_duration: timedelta     # Avg. Trade Duration
-    profit_factor: float
-    expectancy_pct: float             # Expectancy [%]
-    sqn: float
-    kelly_criterion: float
-
     # --- Non-scalar extras (underscore-prefixed, as in the original) ---
-    strategy: str = field(repr=False)             # _strategy
+    strategy: str = field(repr=False)               # _strategy
     equity_curve: pd.DataFrame = field(repr=False)  # _equity_curve
-    trades: pd.DataFrame = field(repr=False)        # _trades

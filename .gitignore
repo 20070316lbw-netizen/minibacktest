@@ -5,9 +5,20 @@ build/
 dist/
 wheels/
 *.egg-info
+.DS_Store
 
 # Virtual environments
 .venv
 
 # 开发使用
 .vscode
+.pytest_cache
+.ruff_cache
+
+# DuckDB 数据库文件(本地数据, 不进版本库)
+*.db
+*.duckdb
+*.db.wal
+
+# 脚本跑出来的图/中间产物
+outputs/

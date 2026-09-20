@@ -8,8 +8,10 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "liudb",
     "load",
     "loguru>=0.7.3",
+    "matplotlib>=3.9",
     "numpy>=2.5.3",
     "pandas>=3.0.5",
     "rich>=15.0.0",
@@ -26,3 +28,9 @@ build-backend = "uv_build"
 [tool.uv.sources]
 load = { git = "https://github.com/20070316lbw-netizen/load.git" }
 sources = { git = "https://github.com/20070316lbw-netizen/sources.git" }
+liudb = { path = "../liudb", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

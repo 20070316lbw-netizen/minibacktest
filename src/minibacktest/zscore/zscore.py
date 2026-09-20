@@ -37,4 +37,4 @@ def zscore_by_date(
     '''
     grouped = factors.groupby(level=date_level)
 
-    return (factors - grouped.transform("mean") / grouped.transform("std"))
+    return (factors - grouped.transform("mean")) / grouped.transform("std")
