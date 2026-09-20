@@ -1,9 +1,9 @@
-""""""
+"""回撤相关指标: 最大回撤、回撤序列、平均回撤深度、回撤持续时间。"""
 
 from __future__ import annotations
 
 import pandas as pd
-import numpy as np
+
 
 def max_drawdown(nav: pd.Series) -> float:
     """算最大回撤(<= 0 的数, 比如 -0.23 代表最大回撤 23%)。

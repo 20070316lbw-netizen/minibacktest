@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+
 def combine_scores(
     z: pd.DataFrame,
     weights: dict[str, float] | None = None,

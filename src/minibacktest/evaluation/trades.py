@@ -44,7 +44,7 @@ def extract_trades(w_hold: pd.DataFrame, price: pd.DataFrame) -> pd.DataFrame:
         change = col_held.ne(col_held.shift(fill_value=False))
         block_id = change.cumsum()
 
-        for _, idx in col_held[col_held].groupby(block_id[col_held]).groups.items():
+        for idx in col_held[col_held].groupby(block_id[col_held]).groups.values():
             entry_date, exit_date = idx[0], idx[-1]
             entry_price = col_price.loc[entry_date]
             exit_price = col_price.loc[exit_date]
@@ -117,7 +117,7 @@ def trade_stats(trades: pd.DataFrame) -> dict[str, object]:
     )
 
     return {
-        "n_trades": int(len(r)),
+        "n_trades": len(r),
         "win_rate_pct": float(win_rate * 100),
         "best_trade_pct": float(r.max()),
         "worst_trade_pct": float(r.min()),

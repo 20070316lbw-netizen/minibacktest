@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 
 import pandas as pd
 from rich.console import Console
@@ -63,7 +64,7 @@ def _format_value(value: object) -> str:
     本来就没有日内时间); 时长折算成天数(小数), 不逐字段打印 days/时分秒。
     """
     if isinstance(value, float):
-        if value != value:  # NaN != NaN, 这是判断 NaN 最直接的写法
+        if math.isnan(value):
             return "-"
         return f"{value:,.2f}"
     if isinstance(value, pd.Timedelta):

@@ -41,7 +41,7 @@ def quantile_long_short(
         >>> d = pd.Timestamp("2024-01-01")
         >>> s = pd.Series({"A": 5.0, "B": 3.0, "C": 1.0, "D": -1.0, "E": -3.0, "F": -5.0})
         >>> s.index = pd.MultiIndex.from_product([[d], s.index], names=["date", "ticker"])
-        >>> quantile_long_short(s, n_quantiles=3)
+        >>> quantile_long_short(score=s, n_quantiles=3)
         date        ticker
         2024-01-01  A         0.5
                     B         0.5
@@ -49,7 +49,7 @@ def quantile_long_short(
                     D         0.0
                     E        -0.5
                     F        -0.5
-        dtype: float64  
+        dtype: float64
     """
     def _weight(s: pd.Series) -> pd.Series:
         """根据因子值,把一批股票分成多个分位数(quantile)组,然后构造一个"多空对冲"(long-short)的权重方案
@@ -82,7 +82,7 @@ def quantile_long_short(
         # 给高低两组股票分配相等权重
         # 最高分位组分配正权重, 最低的为负权重; 中间分位为 0 
         w[long_mask] = 1.0 / long_mask.sum()
-        w[short_mask] = 1.0 / short_mask.sum()
+        w[short_mask] = -1.0 / short_mask.sum()
 
         return w
     

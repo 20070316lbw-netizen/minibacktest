@@ -1,8 +1,9 @@
-""""""
+"""风险调整收益指标: Sharpe, Sortino, Calmar。"""
+
 from __future__ import annotations
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 # Sharpe ratio

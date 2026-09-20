@@ -28,9 +28,10 @@ build-backend = "uv_build"
 [tool.uv.sources]
 load = { git = "https://github.com/20070316lbw-netizen/load.git" }
 sources = { git = "https://github.com/20070316lbw-netizen/sources.git" }
-liudb = { path = "../liudb", editable = true }
+liudb = { git = "https://github.com/20070316lbw-netizen/liudb.git" }
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "ruff>=0.9.0",
 ]

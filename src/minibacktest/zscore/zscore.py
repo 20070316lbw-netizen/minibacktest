@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+
 def zscore_by_date(
         factors: pd.DataFrame,
         *,
