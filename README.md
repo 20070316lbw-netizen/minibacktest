@@ -34,17 +34,62 @@ uv sync
 
 ## 用法
 
-```python
-from minibacktest.zscore.zscore import zscore_by_date
-from minibacktest.signal.combine import combine_scores
-from minibacktest.portfolio.sizing import quantile_long_short
-from minibacktest.engine import run_backtest
-from minibacktest import figure_engine as fe
+### 1. 一键全流程回测 (推荐)
 
-z = zscore_by_date(factors)                                # 因子横截面标准化
-score = combine_scores(z)                                  # 多因子合成打分
-weight = quantile_long_short(score=score, n_quantiles=5)   # 调仓日目标权重
+使用 `Backtester` 统一调度数据读取、多因子加权合成、分位数多空组合、向量化回测及图表生成：
+
+```python
+from minibacktest.backtester import Backtester
+from minibacktest.config import tickers
+from minibacktest.report import print_result
+
+# 配置并初始化回测
+bt = Backtester(
+    tickers=tickers,
+    start="2021-01-01",
+    factor_specs=[
+        ("momentum", {"window": 126}),  # 半年动量
+        ("reversal", {"window": 5}),     # 一周短期反转
+    ],
+    factor_weights={"momentum": 0.7, "reversal": 0.3},
+    freq=21,        # 调仓间隔 (21 个交易日，即月度调仓)
+    n_quantiles=5,  # 五分位数多空对冲
+)
+
+# 运行回测 (若需从网络重新拉取行情并存入 liudb 可设 refresh_data=True)
+result = bt.run(refresh_data=False)
+
+# 终端打印格式化指标表 (收益/夏普/最大回撤/Alpha/Beta 等)
+print_result(result)
+
+# 生成 Tearsheet 总览图 (净值曲线/回撤/滚动 Sharpe/月度热力图/五分位单调性检验)
+fig = bt.plot()
+fig.savefig("outputs/backtester_tearsheet.png", dpi=120)
+```
+
+### 2. 底层模块分步调用
+
+若已有整理好的价格宽表与因子面板，也可直接调用底层核心算子完成定制回测：
+
+```python
+from minibacktest import figure_engine as fe
+from minibacktest.engine import run_backtest
+from minibacktest.portfolio.sizing import quantile_long_short
+from minibacktest.signal.combine import combine_scores
+from minibacktest.zscore.zscore import zscore_by_date
+
+# 1. 因子横截面标准化 (每个截面均值 0、标准差 1)
+z = zscore_by_date(factors)
+
+# 2. 多因子加权合成打分
+score = combine_scores(z, weights={"momentum": 0.7, "reversal": 0.3})
+
+# 3. 截面分位数多空分配权重 (多头和 +1, 空头和 -1, 中间为 0)
+weight = quantile_long_short(score=score, n_quantiles=5)
+
+# 4. 向量化回测 (shift(1) 消除未来函数, 计算净值与绩效)
 result = run_backtest(price=price, target_weight=weight, freq=21)
 
-fig = fe.plot_tearsheet(result.equity_curve)                # 净值/回撤/滚动Sharpe/月度热力图
+# 5. 绘制 Tearsheet 图表
+fig = fe.plot_tearsheet(result.equity_curve)
 ```
