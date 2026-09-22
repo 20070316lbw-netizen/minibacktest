@@ -40,6 +40,8 @@ class Backtester:
         initial_capital: float = 100_000.0,
         periods_per_year: float = 252,
         db_path: str = "sp500.db",
+        commission_bps: float = 0.0,
+        slippage_bps: float = 0.0,
     ) -> None:
         self.tickers = tickers  # 候选池
         self.start = start  # 行情窗口起始日期(拉取和回测读取共用)
@@ -51,6 +53,8 @@ class Backtester:
         self.initial_capital = initial_capital
         self.periods_per_year = periods_per_year
         self.db_path = db_path
+        self.commission_bps = commission_bps  # 单边佣金(bps), 按换手计, 默认 0
+        self.slippage_bps = slippage_bps  # 单边滑点(bps), 计法同佣金, 默认 0
 
         self.price: pd.DataFrame | None = None  # run() 之后: adj_close 宽表
         self.score: pd.Series | None = None  # run() 之后: 调仓日打分(多因子合成后)
@@ -124,6 +128,8 @@ class Backtester:
             freq=self.freq,
             initial_capital=self.initial_capital,
             periods_per_year=self.periods_per_year,
+            commission_bps=self.commission_bps,
+            slippage_bps=self.slippage_bps,
         )
         return self.result
 

@@ -56,6 +56,15 @@ _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("avg_drawdown_duration", "平均回撤持续时间"),
         ],
     ),
+    (
+        "交易成本",
+        [
+            ("commission_bps", "单边佣金 [bps]"),
+            ("slippage_bps", "单边滑点 [bps]"),
+            ("turnover_ann_pct", "年化换手率 [%]"),
+            ("total_cost_pct", "费用总拖累 [%]"),
+        ],
+    ),
 ]
 
 

@@ -63,3 +63,56 @@ def test_run_backtest_shift_1_no_lookahead():
     assert np.isclose(nav.iloc[0], 100.0)
     # 第 1 天持仓生效 (持有 A: 100% 仓位)，A 价格从 10 涨到 11 (+10%)，净值变为 110
     assert np.isclose(nav.iloc[1], 110.0)
+
+
+def test_run_backtest_commission_reduces_equity(sample_price: pd.DataFrame):
+    """佣金/滑点应该拖累净值, 且拖累幅度随费率提高而增大。"""
+    dates = sample_price.index
+    rb_dates = dates[::5]  # 换仓更频繁, 放大费用影响, 更容易观测到差异
+    tickers = sample_price.columns
+
+    records = []
+    for d in rb_dates:
+        records.append({"date": d, "ticker": tickers[0], "weight": 1.0})
+        records.append({"date": d, "ticker": tickers[1], "weight": -1.0})
+    target_weight = pd.DataFrame(records).set_index(["date", "ticker"])["weight"]
+
+    kwargs = dict(price=sample_price, target_weight=target_weight, freq=5, initial_capital=100_000.0)
+
+    res_free = run_backtest(**kwargs)
+    res_cheap = run_backtest(**kwargs, commission_bps=5.0, slippage_bps=5.0)
+    res_pricey = run_backtest(**kwargs, commission_bps=50.0, slippage_bps=50.0)
+
+    # 零费率时不应该产生费用拖累
+    assert np.isclose(res_free.total_cost_pct, 0.0)
+    assert res_free.commission_bps == 0.0 and res_free.slippage_bps == 0.0
+
+    # 费率越高, 扣费后的期末净值应该越低, 费用拖累也越大
+    assert res_pricey.equity_final < res_cheap.equity_final < res_free.equity_final
+    assert 0.0 < res_cheap.total_cost_pct < res_pricey.total_cost_pct
+
+    # 换手率跟费率无关, 三次跑出来应该一致(只是权重铺排方式相同)
+    assert np.isclose(res_free.turnover_ann_pct, res_cheap.turnover_ann_pct)
+    assert np.isclose(res_free.turnover_ann_pct, res_pricey.turnover_ann_pct)
+    assert res_cheap.turnover_ann_pct > 0
+
+    # equity_curve 应该额外带上未扣费的 gross_nav, 方便对比费用拖累
+    assert "gross_nav" in res_cheap.equity_curve.columns
+    assert (res_cheap.equity_curve["gross_nav"] >= res_cheap.equity_curve["nav"]).all()
+
+
+def test_run_backtest_zero_turnover_no_cost():
+    """没有任何持仓变动(比如全程空仓)时, 换手和费用拖累都该是 0, 不受费率设置影响。"""
+    dates = pd.bdate_range("2024-01-01", periods=5)
+    price = pd.DataFrame({"A": [10.0] * 5, "B": [20.0] * 5}, index=dates)
+    empty_idx = pd.MultiIndex.from_arrays([[], []], names=["date", "ticker"])
+    target_weight = pd.Series(dtype=float, index=empty_idx)  # 没有任何目标权重 -> 全程空仓
+
+    res = run_backtest(
+        price=price, target_weight=target_weight, freq=5, initial_capital=100.0,
+        commission_bps=100.0, slippage_bps=100.0,
+    )
+
+    assert np.isclose(res.turnover_ann_pct, 0.0)
+    assert np.isclose(res.total_cost_pct, 0.0)
+    assert np.isclose(res.equity_final, 100.0)

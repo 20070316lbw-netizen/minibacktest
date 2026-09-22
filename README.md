@@ -32,6 +32,19 @@ uv sync
 [Result: 收益 / 夏普 / 回撤 / 五分位单调性检验]
 ```
 
+### 交易成本
+
+`engine.run_backtest`(以及 `Backtester`) 支持按 `commission_bps`(单边佣金)
+和 `slippage_bps`(单边滑点)算交易成本, 两者单位都是 bp(1bp = 0.01%),
+默认都是 0(不计费用, 向后兼容)。算法: 每天的换手 = 当天持仓权重相对前
+一天的变动量之和(绝对值), 只有真正发生调仓的那天才会产生非零换手; 当天
+组合收益率里减去 `换手 × (commission_bps + slippage_bps) / 10000`。
+
+`Result` 里对应新增了 `commission_bps` / `slippage_bps`(记录本次跑的费率)、
+`turnover_ann_pct`(年化换手率)、`total_cost_pct`(费用对期末净值的总拖累,
+= 未扣费净值与扣费净值之差占期初资金的比例); `equity_curve` 也多了一列
+`gross_nav`(未扣费净值), 方便跟扣费后的 `nav` 对比。
+
 ## 用法
 
 ### 1. 一键全流程回测 (推荐)
@@ -54,6 +67,8 @@ bt = Backtester(
     factor_weights={"momentum": 0.7, "reversal": 0.3},
     freq=21,        # 调仓间隔 (21 个交易日，即月度调仓)
     n_quantiles=5,  # 五分位数多空对冲
+    commission_bps=5,   # 单边佣金, 5bp = 0.05%
+    slippage_bps=5,     # 单边滑点, 5bp = 0.05%
 )
 
 # 运行回测 (若需从网络重新拉取行情并存入 liudb 可设 refresh_data=True)
@@ -87,8 +102,11 @@ score = combine_scores(z, weights={"momentum": 0.7, "reversal": 0.3})
 # 3. 截面分位数多空分配权重 (多头和 +1, 空头和 -1, 中间为 0)
 weight = quantile_long_short(score=score, n_quantiles=5)
 
-# 4. 向量化回测 (shift(1) 消除未来函数, 计算净值与绩效)
-result = run_backtest(price=price, target_weight=weight, freq=21)
+# 4. 向量化回测 (shift(1) 消除未来函数, 计算净值/绩效/换手与交易成本拖累)
+result = run_backtest(
+    price=price, target_weight=weight, freq=21,
+    commission_bps=5, slippage_bps=5,  # 不传则默认为 0, 即不计费用
+)
 
 # 5. 绘制 Tearsheet 图表
 fig = fe.plot_tearsheet(result.equity_curve)

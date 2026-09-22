@@ -48,3 +48,9 @@ class Result:
     # --- Non-scalar extras (underscore-prefixed, as in the original) ---
     strategy: str = field(repr=False)               # _strategy
     equity_curve: pd.DataFrame = field(repr=False)  # _equity_curve
+
+    # --- Trading costs ------------------------------------------------
+    commission_bps: float = 0.0       # 单边佣金费率 [bps], 按调仓换手名义金额计
+    slippage_bps: float = 0.0         # 单边滑点费率 [bps], 计法同佣金
+    turnover_ann_pct: float = 0.0     # 年化换手率 [%]
+    total_cost_pct: float = 0.0       # 交易成本对期末净值的总拖累 [%] (相对期初资金)
