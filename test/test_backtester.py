@@ -130,6 +130,50 @@ def test_backtester_load_price_returns_adjusted_close_for_requested_tickers(tmp_
     assert price.loc["2024-01-03", "AAPL"] == 183.5
 
 
+def test_backtester_load_price_respects_end(tmp_path):
+    """传了 end 之后, _load_price() 不该把 end 之后的行也读回来。"""
+    db_path = str(tmp_path / "test_sp500.db")
+    liudb.init_schema(db_path)
+    liudb.save_prices(
+        pd.DataFrame(
+            [
+                {
+                    "date": "2024-01-02",
+                    "ticker": "AAPL",
+                    "open": 180.0,
+                    "high": 185.0,
+                    "low": 179.0,
+                    "close": 182.0,
+                    "adj_close": 181.5,
+                    "volume": 5_000_000.0,
+                },
+                {
+                    "date": "2024-01-03",
+                    "ticker": "AAPL",
+                    "open": 182.0,
+                    "high": 186.0,
+                    "low": 181.0,
+                    "close": 184.0,
+                    "adj_close": 183.5,
+                    "volume": 6_000_000.0,
+                },
+            ]
+        ),
+        path=db_path,
+    )
+
+    bt = Backtester(
+        tickers=["AAPL"],
+        start="2024-01-02",
+        end="2024-01-02",
+        factor_specs=[("momentum", {"window": 1})],
+        db_path=db_path,
+    )
+    price = bt._load_price()
+
+    assert price.index.astype(str).tolist() == ["2024-01-02"]
+
+
 def test_backtester_pull_and_store_mock():
     bt = Backtester(
         tickers=["AAPL"],
@@ -145,6 +189,25 @@ def test_backtester_pull_and_store_mock():
         patch("minibacktest.backtester.liudb.save_prices") as mock_save_prices,
     ):
         bt._pull_and_store()
-        mock_get_prices.assert_called_once_with(["AAPL"], start="2024-01-01")
+        mock_get_prices.assert_called_once_with(["AAPL"], start="2024-01-01", end=None)
         mock_init_schema.assert_called_once_with("mock.db")
         mock_save_prices.assert_called_once_with(fake_prices, "mock.db")
+
+
+def test_backtester_pull_and_store_passes_end():
+    bt = Backtester(
+        tickers=["AAPL"],
+        start="2024-01-01",
+        end="2024-06-30",
+        factor_specs=[("momentum", {"window": 5})],
+        db_path="mock.db",
+    )
+
+    fake_prices = pd.DataFrame([{"ticker": "AAPL", "close": 150.0}])
+    with (
+        patch("minibacktest.backtester.get_prices", return_value=fake_prices) as mock_get_prices,
+        patch("minibacktest.backtester.liudb.init_schema"),
+        patch("minibacktest.backtester.liudb.save_prices"),
+    ):
+        bt._pull_and_store()
+        mock_get_prices.assert_called_once_with(["AAPL"], start="2024-01-01", end="2024-06-30")

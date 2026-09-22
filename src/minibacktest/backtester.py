@@ -31,6 +31,7 @@ class Backtester:
         self,
         tickers: list[str],
         start: str,
+        end: str | None = None,
         *,
         factor_specs: list[tuple[str, dict]],
         factor_weights: dict[str, float] | None = None,
@@ -41,7 +42,8 @@ class Backtester:
         db_path: str = "sp500.db",
     ) -> None:
         self.tickers = tickers  # 候选池
-        self.start = start  # 拉取行情的起始日期
+        self.start = start  # 行情窗口起始日期(拉取和回测读取共用)
+        self.end = end  # 行情窗口结束日期, 不传则不限(拉取到最新, 读取到最新)
         self.factor_specs = factor_specs  # [(因子名, {参数}), ...], 因子名对应 factors 注册表里的 key
         self.factor_weights = factor_weights  # 各因子合成权重, None 就是等权(combine_scores 的默认行为)
         self.freq = freq  # 调仓间隔(交易日数)
@@ -58,20 +60,22 @@ class Backtester:
 
     def _pull_and_store(self) -> None:
         """拉价格数据存进 liudb(按主键覆盖, 重复跑不会产生重复数据)。"""
-        logger.info(f"拉取 {len(self.tickers)} 只标的的价格数据, 起始 {self.start}")
-        prices = get_prices(self.tickers, start=self.start)
+        logger.info(f"拉取 {len(self.tickers)} 只标的的价格数据, 区间 {self.start} ~ {self.end or '最新'}")
+        prices = get_prices(self.tickers, start=self.start, end=self.end)
         liudb.init_schema(self.db_path)
         liudb.save_prices(prices, self.db_path)
         logger.info(f"存入 {len(prices)} 条价格记录到 {self.db_path}")
 
     def _load_price(self) -> pd.DataFrame:
-        """从 liudb 按 tickers/start 查回复权后的 close 长表, 透视成宽表。
+        """从 liudb 按 tickers/start/end 查回复权后的 close 长表, 透视成宽表。
 
         走 liudb.Query/loader 的注册表查询路径: 过滤条件下推到 SQL 里,
         不会像 liudb.load_prices() 那样把整张 prices 表读出来; 取到的
         "close" 已经是复权后的价格(liudb 的 prices 注册表只登记复权口径)。
         """
-        query = liudb.Query(columns=["close"], tickers=self.tickers, start=self.start)
+        query = liudb.Query(
+            columns=["close"], tickers=self.tickers, start=self.start, end=self.end
+        )
         long = liudb.loader(request=query, path=self.db_path)
         wide = long["close"].unstack("ticker")
         return wide.sort_index()
