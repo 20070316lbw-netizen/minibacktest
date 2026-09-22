@@ -745,11 +745,12 @@ wheels = [
 [[package]]
 name = "liudb"
 version = "0.1.0"
-source = { git = "https://github.com/20070316lbw-netizen/liudb.git#a3b9f8593862836fed0e1b2711fe678f23388739" }
+source = { git = "https://github.com/20070316lbw-netizen/liudb.git#cf8c732889dfa5d71760508cbc283d7e09366b6a" }
 dependencies = [
     { name = "duckdb" },
     { name = "loguru" },
     { name = "pandas" },
+    { name = "pydantic" },
 ]
 
 [[package]]

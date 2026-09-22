@@ -65,9 +65,15 @@ class Backtester:
         logger.info(f"存入 {len(prices)} 条价格记录到 {self.db_path}")
 
     def _load_price(self) -> pd.DataFrame:
-        """从 liudb 读回价格长表, 透视成 adj_close 宽表(排除分红/拆股干扰)。"""
-        long = liudb.load_prices(path=self.db_path)
-        wide = long.pivot(index="date", columns="ticker", values="adj_close")
+        """从 liudb 按 tickers/start 查回复权后的 close 长表, 透视成宽表。
+
+        走 liudb.Query/loader 的注册表查询路径: 过滤条件下推到 SQL 里,
+        不会像 liudb.load_prices() 那样把整张 prices 表读出来; 取到的
+        "close" 已经是复权后的价格(liudb 的 prices 注册表只登记复权口径)。
+        """
+        query = liudb.Query(columns=["close"], tickers=self.tickers, start=self.start)
+        long = liudb.loader(request=query, path=self.db_path)
+        wide = long["close"].unstack("ticker")
         return wide.sort_index()
 
     def _build_score(self) -> tuple[pd.Series, pd.Series]:

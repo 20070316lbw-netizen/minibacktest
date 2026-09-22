@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import liudb
 import matplotlib
 
 matplotlib.use("Agg")
@@ -71,6 +72,62 @@ def test_backtester_run_and_plot(sample_price: pd.DataFrame):
     fig = bt.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(bt.quantile_returns, pd.Series)
+
+
+def test_backtester_load_price_returns_adjusted_close_for_requested_tickers(tmp_path):
+    """_load_price() 应该只按 tickers/start 查回复权后的 close, 不是整表读出来。"""
+    db_path = str(tmp_path / "test_sp500.db")
+    liudb.init_schema(db_path)
+    liudb.save_prices(
+        pd.DataFrame(
+            [
+                {
+                    "date": "2024-01-02",
+                    "ticker": "AAPL",
+                    "open": 180.0,
+                    "high": 185.0,
+                    "low": 179.0,
+                    "close": 182.0,
+                    "adj_close": 181.5,
+                    "volume": 5_000_000.0,
+                },
+                {
+                    "date": "2024-01-03",
+                    "ticker": "AAPL",
+                    "open": 182.0,
+                    "high": 186.0,
+                    "low": 181.0,
+                    "close": 184.0,
+                    "adj_close": 183.5,
+                    "volume": 6_000_000.0,
+                },
+                # 不在 Backtester.tickers 候选池里, 不应该出现在结果里
+                {
+                    "date": "2024-01-02",
+                    "ticker": "MSFT",
+                    "open": 370.0,
+                    "high": 375.0,
+                    "low": 368.0,
+                    "close": 372.0,
+                    "adj_close": 372.0,
+                    "volume": 3_000_000.0,
+                },
+            ]
+        ),
+        path=db_path,
+    )
+
+    bt = Backtester(
+        tickers=["AAPL"],
+        start="2024-01-02",
+        factor_specs=[("momentum", {"window": 1})],
+        db_path=db_path,
+    )
+    price = bt._load_price()
+
+    assert price.columns.tolist() == ["AAPL"]
+    assert price.loc["2024-01-02", "AAPL"] == 181.5  # 复权收盘价, 不是未复权的 182.0
+    assert price.loc["2024-01-03", "AAPL"] == 183.5
 
 
 def test_backtester_pull_and_store_mock():
