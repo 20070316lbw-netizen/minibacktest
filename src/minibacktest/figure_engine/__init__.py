@@ -15,17 +15,13 @@
 
 from __future__ import annotations
 
-import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 
-# matplotlib 默认字体(DejaVu Sans)不认中文, 所有汉字都会变成方块; 这里按
-# 系统里能找到的第一个中文字体设置, 找不到就静默跳过(退化成方块, 不报错)。
-# 放在 __init__.py 里是因为要在导入任何 figure_engine 子模块之前生效。
-_CJK_FONT_CANDIDATES = ["Heiti SC", "PingFang SC", "Arial Unicode MS", "Songti SC", "SimHei"]
-_available = {f.name for f in fm.fontManager.ttflist}
-_cjk_font = next((f for f in _CJK_FONT_CANDIDATES if f in _available), None)
-if _cjk_font:
-    plt.rcParams["font.sans-serif"] = [_cjk_font]
+# 图表文字全部用英文(标题/坐标轴/图例), 不依赖任何中文字体——原来按系统里
+# 能找到的中文字体名字("Heiti SC"/"PingFang SC"...)做检测+回退, 换一台没装
+# 这些字体的机器(比如这次这个云端沙箱)就会静默退化成方块字, 治标不治本。
+# axes.unicode_minus 这行跟中文无关, 单独修的是负号在某些字体下画不出来的
+# 老问题, 留着无害。
 plt.rcParams["axes.unicode_minus"] = False
 
 from minibacktest.figure_engine.drawdown import plot_drawdown

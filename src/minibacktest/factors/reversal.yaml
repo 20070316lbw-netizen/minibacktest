@@ -1,0 +1,33 @@
+# 短期反转因子: 短期涨得越多的票, 越可能均值回归, 所以用负的短期动量
+# 当分数(跟 momentum 是同一套计算, 方向相反, 通常配一个更短的 window,
+# 比如 5~10 个交易日, 才能跟"半年动量"体现出区别)。
+#
+# 等价的 Python 写法(迁移前 reversal.py 里的实现): -momentum(price, window=window)
+name: reversal
+params: [window]
+steps:
+  - id: lag_amount
+    op: add
+    a: {const: 1}
+    b: {param: window}
+  - id: near
+    op: shift
+    input: {ref: price}
+    by: {const: 1}
+  - id: far
+    op: shift
+    input: {ref: price}
+    by: {ref: lag_amount}
+  - id: ratio
+    op: divide
+    a: {ref: near}
+    b: {ref: far}
+  - id: momentum_value
+    op: subtract
+    a: {ref: ratio}
+    b: {const: 1.0}
+  - id: result
+    op: multiply
+    a: {ref: momentum_value}
+    b: {const: -1.0}
+output: result

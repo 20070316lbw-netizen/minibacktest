@@ -26,7 +26,7 @@ def plot_quantile_returns(
     colors = ["firebrick" if v < 0 else "seagreen" for v in q.to_numpy()]
     ax.bar([f"Q{int(i) + 1}" for i in q.index], q.to_numpy() * 100, color=colors)
     ax.axhline(0, color="black", linewidth=0.8)
-    ax.set_title("分位数平均前瞻收益(单调性检验)")
-    ax.set_ylabel("平均前瞻收益 [%]")
+    ax.set_title("Quantile Avg Forward Return (Monotonicity Check)")
+    ax.set_ylabel("Avg Forward Return [%]")
     ax.grid(alpha=0.3, axis="y")
     return ax

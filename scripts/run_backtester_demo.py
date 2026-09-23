@@ -16,7 +16,7 @@ from minibacktest.report import print_result
 
 common_kwargs = dict(
     tickers=tickers,
-    start="2021-01-01",
+    start="2010-01-01",
     factor_specs=[
         ("momentum", {"window": 126}),  # 半年动量
         ("reversal", {"window": 5}),  # 一周短期反转
@@ -24,6 +24,7 @@ common_kwargs = dict(
     factor_weights={"momentum": 0.7, "reversal": 0.3},
     freq=21,  # 月度调仓
     n_quantiles=5,
+    db_path="data/sp500.db", 
 )
 
 # 无费率(原来的行为) vs 有费率, 对比看手续费/滑点拖累有多大
@@ -48,6 +49,6 @@ logger.info(
 fig = bt_cost.plot()
 out_dir = Path("outputs")
 out_dir.mkdir(exist_ok=True)
-out_path = out_dir / "backtester_demo_tearsheet.png"
+out_path = out_dir / "backtester_demo_tearsheet_2010.png"
 fig.savefig(out_path, dpi=120)
 logger.info(f"图存到 {out_path.resolve()}")

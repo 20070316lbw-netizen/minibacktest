@@ -31,7 +31,7 @@ def plot_monthly_heatmap(nav: pd.Series, *, ax: plt.Axes | None = None) -> plt.A
     )
 
     im = ax.imshow(pivot.to_numpy(), cmap="RdYlGn", aspect="auto", vmin=-10, vmax=10)
-    ax.set_xticks(range(12), [f"{m}月" for m in range(1, 13)])
+    ax.set_xticks(range(12), [f"M{m}" for m in range(1, 13)])
     ax.set_yticks(range(len(pivot.index)), pivot.index)
 
     for i in range(pivot.shape[0]):
@@ -40,6 +40,6 @@ def plot_monthly_heatmap(nav: pd.Series, *, ax: plt.Axes | None = None) -> plt.A
             if pd.notna(value):
                 ax.text(j, i, f"{value:.1f}", ha="center", va="center", fontsize=8)
 
-    ax.set_title("月度收益热力图 [%]")
+    ax.set_title("Monthly Returns Heatmap [%]")
     plt.colorbar(im, ax=ax, fraction=0.03)
     return ax

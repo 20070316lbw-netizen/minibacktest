@@ -1,0 +1,29 @@
+# 动量因子: 过去 window 个交易日的涨跌幅, 用 t-1 相对 t-1-window 计算
+# (不用当天收盘价, 避免用到"今天才知道"的信息)。
+#
+# 等价的 Python 写法(迁移前 momentum.py 里的实现):
+#   price.shift(1) / price.shift(1 + window) - 1.0
+name: momentum
+params: [window]
+steps:
+  - id: lag_amount
+    op: add
+    a: {const: 1}
+    b: {param: window}
+  - id: near
+    op: shift
+    input: {ref: price}
+    by: {const: 1}
+  - id: far
+    op: shift
+    input: {ref: price}
+    by: {ref: lag_amount}
+  - id: ratio
+    op: divide
+    a: {ref: near}
+    b: {ref: far}
+  - id: result
+    op: subtract
+    a: {ref: ratio}
+    b: {const: 1.0}
+output: result

@@ -26,7 +26,7 @@ def plot_drawdown(nav: pd.Series, *, ax: plt.Axes | None = None) -> plt.Axes:
     ax.plot(dd.index, dd.to_numpy(), color="firebrick", linewidth=0.8)
     ax.axvline(dd.idxmin(), color="black", linestyle="--", linewidth=0.8, alpha=0.6)
 
-    ax.set_title(f"回撤曲线(最大回撤 {max_drawdown(nav) * 100:.1f}%)")
-    ax.set_ylabel("回撤 [%]")
+    ax.set_title(f"Drawdown (Max DD {max_drawdown(nav) * 100:.1f}%)")
+    ax.set_ylabel("Drawdown [%]")
     ax.grid(alpha=0.3)
     return ax

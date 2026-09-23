@@ -34,6 +34,6 @@ def plot_rolling_sharpe(
 
     ax.plot(rolling_sharpe.index, rolling_sharpe.to_numpy(), linewidth=1.0)
     ax.axhline(0, color="black", linewidth=0.8, alpha=0.5)
-    ax.set_title(f"滚动 Sharpe(窗口 {window} 个交易日)")
+    ax.set_title(f"Rolling Sharpe (Window {window}D)")
     ax.grid(alpha=0.3)
     return ax

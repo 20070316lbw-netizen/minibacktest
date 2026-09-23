@@ -22,3 +22,4 @@ wheels/
 
 # 脚本跑出来的图/中间产物
 outputs/
+data

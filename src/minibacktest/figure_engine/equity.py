@@ -19,15 +19,15 @@ def plot_equity_curve(equity_curve: pd.DataFrame, *, ax: plt.Axes | None = None)
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 4))
 
-    ax.plot(equity_curve.index, equity_curve["nav"], label="策略", linewidth=1.5)
+    ax.plot(equity_curve.index, equity_curve["nav"], label="Strategy", linewidth=1.5)
     ax.plot(
         equity_curve.index,
         equity_curve["benchmark_nav"],
-        label="基准(等权买入持有)",
+        label="Benchmark (Equal-Weight Buy & Hold)",
         linewidth=1.0,
         alpha=0.7,
     )
-    ax.set_title("净值曲线")
+    ax.set_title("Equity Curve")
     ax.legend(loc="upper left")
     ax.grid(alpha=0.3)
     return ax

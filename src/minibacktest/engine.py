@@ -70,7 +70,7 @@ def run_backtest(
         target_weight.unstack("ticker")
         .reindex(columns=price.columns, fill_value=0.0)
     )
-    block = rebalance_block(dates, freq)
+    block = rebalance_block(dates, freq) # type: ignore
     w_daily = (
         w_target.reindex(block.to_numpy())
         .set_axis(block.index, axis=0)

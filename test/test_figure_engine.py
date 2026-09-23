@@ -27,7 +27,7 @@ def close_figures():
 def test_plot_equity_curve(sample_equity_curve: pd.DataFrame):
     ax = plot_equity_curve(sample_equity_curve)
     assert isinstance(ax, plt.Axes)
-    assert ax.get_title() == "净值曲线"
+    assert ax.get_title() == "Equity Curve"
 
     # 测试传入现有 ax
     _fig, custom_ax = plt.subplots()
@@ -38,7 +38,7 @@ def test_plot_equity_curve(sample_equity_curve: pd.DataFrame):
 def test_plot_drawdown(sample_nav: pd.Series):
     ax = plot_drawdown(sample_nav)
     assert isinstance(ax, plt.Axes)
-    assert "回撤曲线" in ax.get_title()
+    assert "Drawdown" in ax.get_title()
 
 
 def test_plot_monthly_heatmap():
@@ -50,20 +50,20 @@ def test_plot_monthly_heatmap():
 
     ax = plot_monthly_heatmap(nav)
     assert isinstance(ax, plt.Axes)
-    assert "月度收益热力图" in ax.get_title()
+    assert "Monthly Returns Heatmap" in ax.get_title()
 
 
 def test_plot_rolling_sharpe(sample_nav: pd.Series):
     ax = plot_rolling_sharpe(sample_nav, window=5)
     assert isinstance(ax, plt.Axes)
-    assert "滚动 Sharpe" in ax.get_title()
+    assert "Rolling Sharpe" in ax.get_title()
 
 
 def test_plot_quantile_returns():
     q_ret = pd.Series([-0.05, 0.01, 0.08], index=[0, 1, 2])
     ax = plot_quantile_returns(q_ret)
     assert isinstance(ax, plt.Axes)
-    assert "分位数平均前瞻收益" in ax.get_title()
+    assert "Quantile Avg Forward Return" in ax.get_title()
 
 
 def test_plot_tearsheet(sample_equity_curve: pd.DataFrame):

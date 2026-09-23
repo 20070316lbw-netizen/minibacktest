@@ -4,13 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from minibacktest.factors import available, get, register
-from minibacktest.factors.momentum import momentum
-from minibacktest.factors.reversal import reversal
+from minibacktest.factors import available, get
+from minibacktest.factors.registry import FactorSpecError, _compile
 
 
 def test_factor_registry_basic():
-    # 验证已内置的因子
+    # 验证已注册的内置因子(现在是 factors/*.yaml, 不是装饰器)
     all_factors = available()
     assert "momentum" in all_factors
     assert "reversal" in all_factors
@@ -25,19 +24,54 @@ def test_factor_registry_get_unknown():
         get("nonexistent")
 
 
-def test_factor_registry_duplicate():
-    # 注册一个临时因子
-    @register("test_temp_factor")
-    def _dummy(price, **kwargs):
-        return pd.Series(dtype=float)
+def test_factor_registry_duplicate_name_across_files(tmp_path, monkeypatch):
+    # 两个 YAML 文件写了同一个 name, 扫描阶段就该报错(不是悄悄让后一个覆盖前一个)。
+    import minibacktest.factors.registry as registry_mod
 
-    assert "test_temp_factor" in available()
+    (tmp_path / "a.yaml").write_text(
+        "name: dup\nparams: []\nsteps:\n  - id: r\n    op: add\n    a: {const: 1}\n    b: {const: 1}\noutput: r\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "b.yaml").write_text(
+        "name: dup\nparams: []\nsteps:\n  - id: r\n    op: add\n    a: {const: 2}\n    b: {const: 2}\noutput: r\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(registry_mod, "_FACTORS_DIR", tmp_path)
 
-    # 重复注册报错
-    with pytest.raises(ValueError, match="已经被注册过"):
-        @register("test_temp_factor")
-        def _dummy2(price, **kwargs):
-            return pd.Series(dtype=float)
+    with pytest.raises(FactorSpecError, match="重复出现"):
+        registry_mod.available()
+
+
+def test_factor_spec_missing_output_raises():
+    spec = {"params": [], "steps": [{"id": "r", "op": "add", "a": {"const": 1}, "b": {"const": 1}}]}
+    with pytest.raises(FactorSpecError, match="缺 output"):
+        _compile(spec, factor_name="broken")
+
+
+def test_factor_spec_unknown_op_raises():
+    spec = {
+        "params": [],
+        "steps": [{"id": "r", "op": "not_a_real_op", "a": {"const": 1}, "b": {"const": 1}}],
+        "output": "r",
+    }
+    fn = _compile(spec, factor_name="broken")
+    dates = pd.bdate_range("2024-01-01", periods=3)
+    price = pd.DataFrame({"A": [1.0, 2.0, 3.0]}, index=dates)
+    with pytest.raises(FactorSpecError, match="不在白名单里"):
+        fn(price)
+
+
+def test_factor_spec_unknown_param_raises():
+    spec = {
+        "params": ["window"],
+        "steps": [{"id": "r", "op": "add", "a": {"const": 1}, "b": {"param": "window"}}],
+        "output": "r",
+    }
+    fn = _compile(spec, factor_name="broken")
+    dates = pd.bdate_range("2024-01-01", periods=3)
+    price = pd.DataFrame({"A": [1.0, 2.0, 3.0]}, index=dates)
+    with pytest.raises(FactorSpecError, match="不认识参数"):
+        fn(price, not_declared=1)
 
 
 def test_momentum_factor_calculation():
@@ -45,11 +79,9 @@ def test_momentum_factor_calculation():
     price = pd.DataFrame({"A": [1.0, 1.1, 1.2, 1.3, 1.4]}, index=dates)
 
     # window=2
-    # 日期 0 (01-01): NaN
-    # 日期 1 (01-02): NaN
-    # 日期 2 (01-03): NaN (shift(1) 是 01-02 的 1.1, shift(1+2)=shift(3) 是 NaN)
     # 日期 3 (01-04): shift(1) 是 01-03 (1.2), shift(3) 是 01-01 (1.0) -> 1.2/1.0 - 1 = 0.20
     # 日期 4 (01-05): shift(1) 是 01-04 (1.3), shift(3) 是 01-02 (1.1) -> 1.3/1.1 - 1 = 0.181818...
+    momentum = get("momentum")
     mom = momentum(price, window=2)
     assert isinstance(mom, pd.Series)
     assert mom.name == "momentum"
@@ -67,6 +99,7 @@ def test_momentum_no_lookahead():
     price1 = pd.DataFrame({"A": [1.0, 1.1, 1.2, 1.3, 1.4]}, index=dates)
     price2 = pd.DataFrame({"A": [1.0, 1.1, 1.2, 1.3, 999.0]}, index=dates)  # 最后一天价格暴涨
 
+    momentum = get("momentum")
     mom1 = momentum(price1, window=2)
     mom2 = momentum(price2, window=2)
 
@@ -84,6 +117,8 @@ def test_reversal_factor_is_negative_momentum():
         index=dates,
     )
 
+    momentum = get("momentum")
+    reversal = get("reversal")
     mom = momentum(price, window=2)
     rev = reversal(price, window=2)
 
