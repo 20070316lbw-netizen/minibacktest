@@ -1,5 +1,7 @@
 # minibacktest
 
+[![CI](https://github.com/20070316lbw-netizen/minibacktest/actions/workflows/ci.yml/badge.svg)](https://github.com/20070316lbw-netizen/minibacktest/actions/workflows/ci.yml)
+
 个人的截面多因子回测引擎: 拉数据 -> 因子标准化 -> 合成打分 -> 分位数多空组合 -> 向量化回测出净值曲线。
 
 不是事件驱动(不逐笔模拟买卖), 而是矩阵化的向量化回测, 所以 `Result` 只包含净值
