@@ -14,18 +14,18 @@ from minibacktest.backtester import Backtester
 from minibacktest.config import tickers
 from minibacktest.report import print_result
 
-common_kwargs = dict(
-    tickers=tickers,
-    start="2010-01-01",
-    factor_specs=[
+common_kwargs = {
+    "tickers": tickers,
+    "start": "2010-01-01",
+    "factor_specs": [
         ("momentum", {"window": 126}),  # 半年动量
         ("reversal", {"window": 5}),  # 一周短期反转
     ],
-    factor_weights={"momentum": 0.7, "reversal": 0.3},
-    freq=21,  # 月度调仓
-    n_quantiles=5,
-    db_path="data/sp500.db", 
-)
+    "factor_weights": {"momentum": 0.7, "reversal": 0.3},
+    "freq": 21,  # 月度调仓
+    "n_quantiles": 5,
+    "db_path": "data/sp500.db",
+}
 
 # 无费率(原来的行为) vs 有费率, 对比看手续费/滑点拖累有多大
 bt = Backtester(**common_kwargs)

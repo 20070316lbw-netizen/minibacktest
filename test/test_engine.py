@@ -77,7 +77,7 @@ def test_run_backtest_commission_reduces_equity(sample_price: pd.DataFrame):
         records.append({"date": d, "ticker": tickers[1], "weight": -1.0})
     target_weight = pd.DataFrame(records).set_index(["date", "ticker"])["weight"]
 
-    kwargs = dict(price=sample_price, target_weight=target_weight, freq=5, initial_capital=100_000.0)
+    kwargs = {"price": sample_price, "target_weight": target_weight, "freq": 5, "initial_capital": 100_000.0}
 
     res_free = run_backtest(**kwargs)
     res_cheap = run_backtest(**kwargs, commission_bps=5.0, slippage_bps=5.0)

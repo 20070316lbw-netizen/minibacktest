@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 from minibacktest.backtester import Backtester
 from minibacktest.config import tickers
 
@@ -35,7 +37,7 @@ print(f"{'调仓日':<12}{'多头留任%':>10}{'空头留任%':>10}{'多头数':
 long_overlaps: list[float] = []
 short_overlaps: list[float] = []
 
-for prev_d, curr_d in zip(dates[:-1], dates[1:]):
+for prev_d, curr_d in itertools.pairwise(dates):
     prev_w = by_date.get_group(prev_d)
     curr_w = by_date.get_group(curr_d)
 
