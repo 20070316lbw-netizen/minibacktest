@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from minibacktest.factors import available, get
+from minibacktest.factors import (
+    EXTRA_DIRS_ENV_VAR,
+    available,
+    compile_spec,
+    get,
+    load_specs,
+    validate_spec,
+)
 from minibacktest.factors.registry import FactorSpecError, _compile
 
 
@@ -54,11 +63,9 @@ def test_factor_spec_unknown_op_raises():
         "steps": [{"id": "r", "op": "not_a_real_op", "a": {"const": 1}, "b": {"const": 1}}],
         "output": "r",
     }
-    fn = _compile(spec, factor_name="broken")
-    dates = pd.bdate_range("2024-01-01", periods=3)
-    price = pd.DataFrame({"A": [1.0, 2.0, 3.0]}, index=dates)
+    # 静态校验: 编译(也就是扫描注册表)时就报, 不拖到真正算的时候。
     with pytest.raises(FactorSpecError, match="不在白名单里"):
-        fn(price)
+        _compile(spec, factor_name="broken")
 
 
 def test_factor_spec_unknown_param_raises():
@@ -127,3 +134,111 @@ def test_reversal_factor_is_negative_momentum():
 
     # 对齐后比对取负值
     pd.testing.assert_series_equal(rev, -mom, check_names=False)
+
+
+# ---- 静态校验 / 防未来函数 / 额外因子目录 ----
+
+def _price() -> pd.DataFrame:
+    dates = pd.bdate_range("2024-01-01", periods=6)
+    return pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}, index=dates)
+
+
+def test_negative_const_shift_rejected_at_compile():
+    spec = {"steps": [{"id": "f", "op": "shift", "input": {"ref": "price"}, "by": {"const": -1}}], "output": "f"}
+    with pytest.raises(FactorSpecError, match="未来函数"):
+        compile_spec(spec, factor_name="peek")
+
+
+def test_negative_param_shift_rejected_at_runtime():
+    spec = {
+        "params": ["n"],
+        "steps": [{"id": "f", "op": "shift", "input": {"ref": "price"}, "by": {"param": "n"}}],
+        "output": "f",
+    }
+    fn = compile_spec(spec, factor_name="peek")
+    assert fn(_price(), n=1).notna().any()
+    with pytest.raises(FactorSpecError, match="未来函数"):
+        fn(_price(), n=-2)
+
+
+def test_non_integer_shift_rejected():
+    spec = {"steps": [{"id": "f", "op": "shift", "input": {"ref": "price"}, "by": {"const": 1.5}}], "output": "f"}
+    with pytest.raises(FactorSpecError, match="必须是整数"):
+        compile_spec(spec, factor_name="frac")
+
+
+def test_ref_to_later_step_rejected():
+    spec = {
+        "steps": [
+            {"id": "a", "op": "add", "a": {"ref": "b"}, "b": {"const": 1}},
+            {"id": "b", "op": "add", "a": {"ref": "price"}, "b": {"const": 1}},
+        ],
+        "output": "b",
+    }
+    with pytest.raises(FactorSpecError, match="不存在"):
+        validate_spec(spec, factor_name="loop")
+
+
+def test_undeclared_param_and_extra_field_rejected():
+    with pytest.raises(FactorSpecError, match="没在 params 里声明"):
+        validate_spec(
+            {"steps": [{"id": "a", "op": "add", "a": {"ref": "price"}, "b": {"param": "w"}}], "output": "a"},
+            factor_name="x",
+        )
+    with pytest.raises(FactorSpecError, match="不认识的字段"):
+        validate_spec(
+            {"steps": [{"id": "a", "op": "add", "a": {"ref": "price"}, "b": {"const": 1}, "c": 2}], "output": "a"},
+            factor_name="x",
+        )
+
+
+def test_shift_input_must_be_ref_and_const_must_be_number():
+    with pytest.raises(FactorSpecError, match="input 必须是"):
+        validate_spec(
+            {"steps": [{"id": "a", "op": "shift", "input": {"const": 1}, "by": {"const": 1}}], "output": "a"},
+            factor_name="x",
+        )
+    with pytest.raises(FactorSpecError, match="const 必须是数字"):
+        validate_spec(
+            {"steps": [{"id": "a", "op": "add", "a": {"ref": "price"}, "b": {"const": "1"}}], "output": "a"},
+            factor_name="x",
+        )
+
+
+def test_validate_spec_partial_allows_unfinished_draft():
+    validate_spec({"params": ["w"]}, factor_name="draft", partial=True)
+    validate_spec(
+        {"params": [], "steps": [{"id": "a", "op": "add", "a": {"ref": "price"}, "b": {"const": 1}}]},
+        factor_name="draft",
+        partial=True,
+    )
+    with pytest.raises(FactorSpecError, match="缺 output"):
+        validate_spec({"params": [], "steps": [{"id": "a", "op": "add", "a": {"ref": "price"}, "b": {"const": 1}}]},
+                      factor_name="draft")
+
+
+def test_extra_factor_dirs_env(tmp_path, monkeypatch):
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "double.yaml").write_text(
+        "name: double\nsteps:\n  - id: r\n    op: multiply\n    a: {ref: price}\n    b: {const: 2}\noutput: r\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(EXTRA_DIRS_ENV_VAR, f"{lib}{os.pathsep}{tmp_path / 'missing'}")
+    assert "double" in available()
+    assert "momentum" in available()
+    out = get("double")(_price())
+    assert out.iloc[0] == 2.0
+    path, spec = load_specs()["double"]
+    assert path == lib / "double.yaml"
+    assert spec["output"] == "r"
+
+
+def test_extra_dir_cannot_shadow_builtin(tmp_path, monkeypatch):
+    (tmp_path / "m.yaml").write_text(
+        "name: momentum\nsteps:\n  - id: r\n    op: add\n    a: {ref: price}\n    b: {const: 0}\noutput: r\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(EXTRA_DIRS_ENV_VAR, str(tmp_path))
+    with pytest.raises(FactorSpecError, match="重复出现"):
+        available()

@@ -198,8 +198,22 @@ output: result
   常量，这样同一个因子模板才能像 `momentum`/`reversal` 一样被复用不同参数，
   而不是换一个数字就要新建一个因子。
 
-现在还没做的：`quant-assistant` 那边把"新建因子/拼零件"包成 MCP 工具（还
-没开始）；本地资源限制（子进程 + 超时 + 内存上限）这层还没写；词表目前只有
-`add`/`subtract`/`multiply`/`divide`/`shift` 五种 op，够表达 `momentum`/
-`reversal` 这类因子，遇到表达不出来的需求（比如滚动均值、横截面排名）再
-按需加，不提前设计。
+`quant-assistant` 那边已经接上了（2026-09-23，见该仓库 README「Agent 拼装因子
+工具」一节）：新建草稿 / 加一步 / 撤销 / 指定输出 / 保存 / 试算 / 回测都包成了
+MCP 工具，试算和回测跑在带 CPU/内存上限 + 墙钟超时的子进程里。为此这边的
+`factors/registry.py` 补了几样东西：
+
+- `validate_spec(spec, factor_name=..., partial=False)`：纯静态校验(不碰数据),
+  `_compile` 一开始就调它, 所以 op 写错、引用了后面才出现的 id、用了没声明的
+  参数这类错误在扫描注册表时就报, 不再拖到真正计算的时候。`partial=True` 给
+  "还没拼完的草稿"用(允许没有 steps/output)。
+- 防未来函数: `shift` 的位移必须是非负整数, 常数在静态校验时拦, 参数算出来的
+  负数在运行时拦。
+- `MINIBACKTEST_EXTRA_FACTOR_DIRS` 环境变量(或 `load_specs(extra_dirs=...)`)
+  把本仓库之外的因子目录挂进注册表; 跟内置因子同名直接报错, 不会覆盖。
+- 公开 `compile_spec` / `load_specs` / `factor_dirs` / `ALLOWED_OPS` / `OP_FIELDS`,
+  外部调用方不用再碰下划线开头的私有函数。
+
+还没做的: 词表目前只有 `add`/`subtract`/`multiply`/`divide`/`shift` 五种 op,
+够表达 `momentum`/`reversal` 这类因子, 遇到表达不出来的需求(比如滚动均值、
+横截面排名)再按需加, 不提前设计。
