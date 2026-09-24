@@ -242,3 +242,77 @@ def test_extra_dir_cannot_shadow_builtin(tmp_path, monkeypatch):
     monkeypatch.setenv(EXTRA_DIRS_ENV_VAR, str(tmp_path))
     with pytest.raises(FactorSpecError, match="重复出现"):
         available()
+
+
+@pytest.mark.parametrize("op,expected", [
+    ("rolling_mean", 4.0),
+    ("rolling_std", 1.0),
+    ("rolling_min", 3.0),
+    ("rolling_max", 5.0),
+])
+def test_rolling_ops_use_full_trailing_window(op, expected):
+    price = _price()
+    spec = {
+        "params": ["n"],
+        "steps": [{"id": "result", "op": op, "input": {"ref": "price"}, "window": {"param": "n"}}],
+        "output": "result",
+    }
+    values = compile_spec(spec, factor_name="rolling")(price, n=3)
+    assert values.loc[(price.index[2], "A")] == pytest.approx(2.0 if op == "rolling_mean" else
+                                                            1.0 if op == "rolling_std" else
+                                                            1.0 if op == "rolling_min" else 3.0)
+    assert values.loc[(price.index[4], "A")] == pytest.approx(expected)
+    assert pd.isna(values.loc[(price.index[0], "A")])
+    assert pd.isna(values.loc[(price.index[1], "A")])
+
+
+def test_rolling_ops_do_not_read_future_rows():
+    spec = {"steps": [{"id": "result", "op": "rolling_mean", "input": {"ref": "price"},
+                       "window": {"const": 3}}], "output": "result"}
+    price = _price()
+    changed = price.copy()
+    changed.iloc[-1, 0] = 999.0
+    fn = compile_spec(spec, factor_name="past_only")
+    original = fn(price)
+    revised = fn(changed)
+    pd.testing.assert_series_equal(original.iloc[:-1], revised.iloc[:-1])
+
+
+def test_rolling_window_rejects_invalid_constants_and_params():
+    for invalid in [-1, 0, 1.5, 513]:
+        spec = {"steps": [{"id": "r", "op": "rolling_mean", "input": {"ref": "price"},
+                           "window": {"const": invalid}}], "output": "r"}
+        with pytest.raises(FactorSpecError, match="滚动窗口"):
+            compile_spec(spec, factor_name="bad_window")
+    with pytest.raises(FactorSpecError, match="const 必须是数字"):
+        compile_spec({"steps": [{"id": "r", "op": "rolling_mean", "input": {"ref": "price"},
+                                 "window": {"const": True}}], "output": "r"}, factor_name="bad_bool")
+    spec = {"params": ["n"], "steps": [{"id": "r", "op": "rolling_mean",
+                                            "input": {"ref": "price"}, "window": {"param": "n"}}], "output": "r"}
+    fn = compile_spec(spec, factor_name="bad_param")
+    with pytest.raises(FactorSpecError, match="滚动窗口"):
+        fn(_price(), n=-2)
+    with pytest.raises(FactorSpecError, match="只接受 const 或 param"):
+        compile_spec({"steps": [{"id": "r", "op": "rolling_mean", "input": {"ref": "price"},
+                                 "window": {"ref": "price"}}], "output": "r"}, factor_name="bad_ref")
+
+
+def test_cross_section_rank_is_per_date_and_keeps_missing_values():
+    dates = pd.bdate_range("2024-01-01", periods=2)
+    price = pd.DataFrame({"A": [10.0, 30.0], "B": [20.0, 10.0], "C": [np.nan, 20.0]}, index=dates)
+    spec = {"steps": [{"id": "r", "op": "cross_section_rank", "input": {"ref": "price"}}], "output": "r"}
+    values = compile_spec(spec, factor_name="rank")(price)
+    assert values.loc[(dates[0], "A")] == pytest.approx(0.5)
+    assert values.loc[(dates[0], "B")] == pytest.approx(1.0)
+    assert pd.isna(values.loc[(dates[0], "C")])
+    assert values.loc[(dates[1], "A")] == pytest.approx(1.0)
+    assert values.loc[(dates[1], "B")] == pytest.approx(1 / 3)
+
+
+def test_cross_section_rank_treats_infinity_as_missing():
+    price = pd.DataFrame({"A": [1.0], "B": [np.inf], "C": [2.0]}, index=pd.bdate_range("2024-01-01", periods=1))
+    spec = {"steps": [{"id": "r", "op": "cross_section_rank", "input": {"ref": "price"}}], "output": "r"}
+    values = compile_spec(spec, factor_name="rank")(price)
+    assert values.iloc[0] == pytest.approx(0.5)
+    assert pd.isna(values.iloc[1])
+    assert values.iloc[2] == pytest.approx(1.0)

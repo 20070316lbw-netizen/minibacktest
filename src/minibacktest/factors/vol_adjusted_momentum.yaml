@@ -1,0 +1,44 @@
+name: vol_adjusted_momentum
+description: 前一日已知的 window 日动量除以 vol_window 日日收益标准差，再做同日横截面排名
+params: [window, vol_window]
+steps:
+  - id: lag
+    op: shift
+    input: {ref: price}
+    by: {const: 1}
+  - id: far
+    op: shift
+    input: {ref: lag}
+    by: {param: window}
+  - id: mom_ratio
+    op: divide
+    a: {ref: lag}
+    b: {ref: far}
+  - id: momentum
+    op: subtract
+    a: {ref: mom_ratio}
+    b: {const: 1}
+  - id: yesterday
+    op: shift
+    input: {ref: lag}
+    by: {const: 1}
+  - id: day_ratio
+    op: divide
+    a: {ref: lag}
+    b: {ref: yesterday}
+  - id: day_return
+    op: subtract
+    a: {ref: day_ratio}
+    b: {const: 1}
+  - id: vol
+    op: rolling_std
+    input: {ref: day_return}
+    window: {param: vol_window}
+  - id: adjusted
+    op: divide
+    a: {ref: momentum}
+    b: {ref: vol}
+  - id: rank
+    op: cross_section_rank
+    input: {ref: adjusted}
+output: rank

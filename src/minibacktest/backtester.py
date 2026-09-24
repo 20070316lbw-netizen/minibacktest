@@ -3,12 +3,16 @@
 
 Backtester 本身不实现任何计算逻辑 —— 因子在 factors/ 里按名字注册, 标准化
 用 zscore.zscore_by_date, 合成用 signal.combine.combine_scores, 分组用
-portfolio.sizing.quantile_long_short, 回测用 engine.run_backtest, 出图用
-figure_engine.plot_tearsheet。这个类只负责把调用顺序和参数传递这件"胶水"
-的事包起来 —— 新增因子/评估指标/图表都直接加在对应模块里, 不用改这个类。
+sizing_fn(默认 portfolio.sizing.make_quantile_sizer, 可换成
+portfolio.sizing.make_vol_neutral_sizer 等其他仓位构造策略), 回测用
+engine.run_backtest, 出图用 figure_engine.plot_tearsheet。这个类只负责把
+调用顺序和参数传递这件"胶水"的事包起来 —— 新增因子/评估指标/图表/仓位
+构造策略都直接加在对应模块里, 不用改这个类。
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 import liudb
 import pandas as pd
@@ -20,7 +24,7 @@ from minibacktest.base import Result
 from minibacktest.engine import run_backtest
 from minibacktest.evaluation.quantile import quantile_forward_returns
 from minibacktest.figure_engine import plot_tearsheet
-from minibacktest.portfolio.sizing import quantile_long_short
+from minibacktest.portfolio.sizing import make_quantile_sizer
 from minibacktest.rebalance import rebalance_dates
 from minibacktest.signal.combine import combine_scores
 from minibacktest.zscore.zscore import zscore_by_date
@@ -42,6 +46,7 @@ class Backtester:
         db_path: str = "sp500.db",
         commission_bps: float = 0.0,
         slippage_bps: float = 0.0,
+        sizing_fn: Callable[[pd.Series, pd.DataFrame], pd.Series] | None = None,
     ) -> None:
         self.tickers = tickers  # 候选池
         self.start = start  # 行情窗口起始日期(拉取和回测读取共用)
@@ -49,12 +54,19 @@ class Backtester:
         self.factor_specs = factor_specs  # [(因子名, {参数}), ...], 因子名对应 factors 注册表里的 key
         self.factor_weights = factor_weights  # 各因子合成权重, None 就是等权(combine_scores 的默认行为)
         self.freq = freq  # 调仓间隔(交易日数)
-        self.n_quantiles = n_quantiles  # 分位数分组数
+        self.n_quantiles = n_quantiles  # 分位数分组数(同时也是 plot() 里单调性检验图默认用的分组数)
         self.initial_capital = initial_capital
         self.periods_per_year = periods_per_year
         self.db_path = db_path
         self.commission_bps = commission_bps  # 单边佣金(bps), 按换手计, 默认 0
         self.slippage_bps = slippage_bps  # 单边滑点(bps), 计法同佣金, 默认 0
+
+        # 仓位构造策略: (score, price) -> weight 的可插拔函数。不传就用
+        # portfolio.sizing.make_quantile_sizer(n_quantiles) 包出来的默认
+        # 行为(纯分位数多空), 跟以前完全一样。想用波动率中性化, 传
+        # portfolio.sizing.make_vol_neutral_sizer(...) 的返回值进来即可,
+        # Backtester 本身不需要为每种分组方式单独加开关参数。
+        self.sizing_fn = sizing_fn or make_quantile_sizer(n_quantiles=n_quantiles)
 
         self.price: pd.DataFrame | None = None  # run() 之后: adj_close 宽表
         self.score: pd.Series | None = None  # run() 之后: 调仓日打分(多因子合成后)
@@ -103,7 +115,7 @@ class Backtester:
         factor_df = pd.concat(columns, axis=1)  # 横向拼: 按 (date, ticker) 对齐, 缺的地方是 NaN
         z = zscore_by_date(factor_df)
         score = combine_scores(z, weights=self.factor_weights)
-        weight = quantile_long_short(score=score, n_quantiles=self.n_quantiles)
+        weight = self.sizing_fn(score, self.price)
         return score, weight
 
     def run(self, *, refresh_data: bool = True) -> Result:

@@ -1,0 +1,24 @@
+name: ma_deviation_rank
+description: 前一日收盘价相对过去 window 日均价的偏离，再做同日横截面排名
+params: [window]
+steps:
+  - id: lag
+    op: shift
+    input: {ref: price}
+    by: {const: 1}
+  - id: ma
+    op: rolling_mean
+    input: {ref: lag}
+    window: {param: window}
+  - id: ratio
+    op: divide
+    a: {ref: lag}
+    b: {ref: ma}
+  - id: gap
+    op: subtract
+    a: {ref: ratio}
+    b: {const: 1}
+  - id: rank
+    op: cross_section_rank
+    input: {ref: gap}
+output: rank

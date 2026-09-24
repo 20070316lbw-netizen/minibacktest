@@ -152,8 +152,8 @@ steps:
 output: result
 ```
 
-每一步有 `id`（后面的步骤靠 `{ref: 这个 id}` 引用它）和 `op`（只认 `add`/
-`subtract`/`multiply`/`divide`/`shift` 这五种，都是纯数值运算），操作数只有
+每一步有 `id`（后面的步骤靠 `{ref: 这个 id}` 引用它）和 `op`（支持四则运算、
+`shift`、`rolling_mean`/`rolling_std`/`rolling_min`/`rolling_max`、`cross_section_rank`），操作数只有
 三种写法：`{const: 数字}`、`{param: 参数名}`（从调用时的 `**kwargs` 里取）、
 `{ref: 前面某一步的 id, 或者内置的 "price"}`（`price` 指向传进来的整张价格
 宽表）。`output` 指明哪一步是最终结果。`momentum`/`reversal` 两个因子都已经
@@ -214,6 +214,8 @@ MCP 工具，试算和回测跑在带 CPU/内存上限 + 墙钟超时的子进�
 - 公开 `compile_spec` / `load_specs` / `factor_dirs` / `ALLOWED_OPS` / `OP_FIELDS`,
   外部调用方不用再碰下划线开头的私有函数。
 
-还没做的: 词表目前只有 `add`/`subtract`/`multiply`/`divide`/`shift` 五种 op,
-够表达 `momentum`/`reversal` 这类因子, 遇到表达不出来的需求(比如滚动均值、
-横截面排名)再按需加, 不提前设计。
+词表已增加四种滚动运算和同日横截面排名：滚动运算使用 `input: {ref: ...}`
+与 `window: {const: 整数}` 或 `{param: 参数名}`，窗口限 1~512 个交易日，
+需要完整窗口才产出值；`cross_section_rank` 只需 `input`，每天对非空标的做
+升序百分位排名，空值和无穷值不参与排名。滚动计算包含当日及过去的数据，不读取未来行。
+`quant-assistant` 的草稿工具支持这些 op，且能试算尚未设置 output 的中间步骤。

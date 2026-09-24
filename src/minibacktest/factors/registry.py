@@ -63,17 +63,21 @@ FactorFn = Callable[..., pd.Series]
 
 _FACTORS_DIR = Path(__file__).parent
 
-# op -> 需要的操作数字段名; "shift" 是唯一的一元-with-参数运算(input + by),
-# 其余都是二元运算(a + b)。新增 op 时同时更新这里和 _apply_op。
+# op -> 需要的操作数字段名。新增 op 时同时更新这里和 _apply_op。
 _BINARY_OPS = frozenset({"add", "subtract", "multiply", "divide"})
-ALLOWED_OPS = _BINARY_OPS | {"shift"}
+_ROLLING_OPS = frozenset({"rolling_mean", "rolling_std", "rolling_min", "rolling_max"})
+ALLOWED_OPS = _BINARY_OPS | _ROLLING_OPS | {"shift", "cross_section_rank"}
 _ALLOWED_OPS = ALLOWED_OPS  # 旧名字, 保留给已有调用方
 
 # 每种 op 需要哪些操作数字段(按顺序)。
-OP_FIELDS: dict[str, tuple[str, str]] = {
+OP_FIELDS: dict[str, tuple[str, ...]] = {
     **{op: ("a", "b") for op in sorted(_BINARY_OPS)},
     "shift": ("input", "by"),
+    **{op: ("input", "window") for op in sorted(_ROLLING_OPS)},
+    "cross_section_rank": ("input",),
 }
+
+MAX_ROLLING_WINDOW = 512
 
 # 内置引用: 整张价格宽表。step id 不能跟它撞名。
 BUILTIN_REF = "price"
@@ -136,6 +140,20 @@ def _shift_amount(by: Any, *, factor_name: str) -> int:
     return n
 
 
+def _rolling_window(value: Any, *, factor_name: str) -> int:
+    """滚动窗口必须是有界正整数; 参数值在运行时也走这条校验。"""
+    try:
+        n = int(value)
+        exact = not isinstance(value, bool) and n == value
+    except (TypeError, ValueError, OverflowError):
+        exact = False
+    if not exact or not 1 <= n <= MAX_ROLLING_WINDOW:
+        raise FactorSpecError(
+            f"因子 {factor_name!r} 的滚动窗口必须是 1~{MAX_ROLLING_WINDOW} 的整数, 拿到的是 {value!r}"
+        )
+    return n
+
+
 def _check_operand(
     operand: Any, *, known_ids: set[str], declared_params: list[str], factor_name: str, where: str
 ) -> None:
@@ -171,7 +189,8 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
     检查: 顶层是字典; params 是不重复的字符串列表; 每一步有唯一 id(不跟
     "price" 撞名)、op 在白名单里、字段齐全且没有多余字段; 操作数形状正确,
     param 已声明, ref 只能指向 "price" 或前面的步骤(所以不可能成环);
-    shift 的 input 必须是 ref, 常数位移必须是非负整数; output 指向存在的步骤。
+    shift/滚动/截面排名的 input 必须是 ref; 常数位移必须是非负整数,
+    滚动窗口必须是 1~512 的整数; output 指向存在的步骤。
 
     Args:
         spec: yaml.safe_load 出来的顶层对象。
@@ -224,11 +243,15 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
                 factor_name=factor_name,
                 where=f"步骤 {step_id!r} 的 {field}",
             )
-        if op == "shift":
-            if "ref" not in step["input"]:
-                raise FactorSpecError(f"因子 {factor_name!r} 的 shift 步骤 {step_id!r} 的 input 必须是 {{ref: ...}}")
-            if "const" in step["by"]:
-                _shift_amount(step["by"]["const"], factor_name=factor_name)
+        if (op == "shift" or op in _ROLLING_OPS or op == "cross_section_rank") and "ref" not in step["input"]:
+            raise FactorSpecError(f"因子 {factor_name!r} 的 {op} 步骤 {step_id!r} 的 input 必须是 {{ref: ...}}")
+        if op == "shift" and "const" in step["by"]:
+            _shift_amount(step["by"]["const"], factor_name=factor_name)
+        if op in _ROLLING_OPS:
+            if "ref" in step["window"]:
+                raise FactorSpecError(f"因子 {factor_name!r} 的 {op} 步骤 {step_id!r} 的 window 只接受 const 或 param")
+            if "const" in step["window"]:
+                _rolling_window(step["window"]["const"], factor_name=factor_name)
         known_ids.add(step_id)
 
     output_id = spec.get("output")
@@ -267,6 +290,23 @@ def _apply_op(step: dict[str, Any], env: dict[str, Any], params: Mapping[str, An
         source = _resolve_operand(step["input"], env, params, factor_name=factor_name)
         by = _resolve_operand(step["by"], env, params, factor_name=factor_name)
         return source.shift(_shift_amount(by, factor_name=factor_name))
+
+    if op in _ROLLING_OPS or op == "cross_section_rank":
+        source = _resolve_operand(step["input"], env, params, factor_name=factor_name)
+        if not isinstance(source, pd.DataFrame):
+            raise FactorSpecError(f"因子 {factor_name!r} 的 {op} input 必须是价格宽表或前面算出的宽表")
+        if op == "cross_section_rank":
+            return source.replace([float("inf"), float("-inf")], float("nan")).rank(axis=1, method="average", pct=True)
+        window = _rolling_window(_resolve_operand(step["window"], env, params, factor_name=factor_name),
+                                 factor_name=factor_name)
+        rolling = source.rolling(window=window, min_periods=window)
+        if op == "rolling_mean":
+            return rolling.mean()
+        if op == "rolling_std":
+            return rolling.std()
+        if op == "rolling_min":
+            return rolling.min()
+        return rolling.max()  # rolling_max
 
     if "a" not in step or "b" not in step:
         raise FactorSpecError(f"因子 {factor_name!r} 的 {op} 步骤缺 a 或 b: {step!r}")
