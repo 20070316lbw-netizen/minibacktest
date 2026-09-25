@@ -1,0 +1,14 @@
+name: ohlc_channel_position
+description: 前一日收盘价在过去 window 日复权最高最低价区间的位置
+params: [window]
+steps:
+  - {id: c, op: shift, input: {ref: close}, by: {const: 1}}
+  - {id: h, op: shift, input: {ref: high}, by: {const: 1}}
+  - {id: l, op: shift, input: {ref: low}, by: {const: 1}}
+  - {id: ceiling, op: rolling_max, input: {ref: h}, window: {param: window}}
+  - {id: floor, op: rolling_min, input: {ref: l}, window: {param: window}}
+  - {id: above_floor, op: subtract, a: {ref: c}, b: {ref: floor}}
+  - {id: span, op: subtract, a: {ref: ceiling}, b: {ref: floor}}
+  - {id: safe_span, op: add, a: {ref: span}, b: {const: 1.0e-12}}
+  - {id: result, op: divide, a: {ref: above_floor}, b: {ref: safe_span}}
+output: result

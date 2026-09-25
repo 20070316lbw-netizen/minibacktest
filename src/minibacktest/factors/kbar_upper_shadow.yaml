@@ -1,0 +1,10 @@
+name: kbar_upper_shadow
+description: 前一日上影线长度除以复权开盘价，方向与 qlib KUP 相同
+steps:
+  - {id: o, op: shift, input: {ref: open}, by: {const: 1}}
+  - {id: c, op: shift, input: {ref: close}, by: {const: 1}}
+  - {id: h, op: shift, input: {ref: high}, by: {const: 1}}
+  - {id: body_top, op: elementwise_max, a: {ref: o}, b: {ref: c}}
+  - {id: shadow, op: subtract, a: {ref: h}, b: {ref: body_top}}
+  - {id: result, op: divide, a: {ref: shadow}, b: {ref: o}}
+output: result

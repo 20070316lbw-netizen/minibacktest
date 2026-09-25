@@ -34,7 +34,7 @@ from minibacktest.portfolio.sizing import (
 from minibacktest.risk.volatility import realized_volatility
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_DB = REPO.parent / "quant-assistant/data/sp500.db"
+DEFAULT_DB = REPO / "data/sp500.db"
 DEFAULT_OUTPUT = REPO / "outputs/extended_factors_vol_buckets"
 SCENARIOS = [
     ("momentum", {"window": 126}),

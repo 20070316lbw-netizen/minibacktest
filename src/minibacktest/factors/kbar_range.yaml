@@ -1,0 +1,9 @@
+name: kbar_range
+description: 前一日复权最高最低价差除以复权开盘价，方向与 qlib KLEN 相同
+steps:
+  - {id: o, op: shift, input: {ref: open}, by: {const: 1}}
+  - {id: h, op: shift, input: {ref: high}, by: {const: 1}}
+  - {id: l, op: shift, input: {ref: low}, by: {const: 1}}
+  - {id: span, op: subtract, a: {ref: h}, b: {ref: l}}
+  - {id: result, op: divide, a: {ref: span}, b: {ref: o}}
+output: result

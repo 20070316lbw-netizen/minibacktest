@@ -8,9 +8,28 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from minibacktest.risk.volatility import realized_volatility
+
+
+def _check_buffer(buffer: float, n_quantiles: int) -> None:
+    """缓冲带宽度校验: 多头出场线 (1 - 1/n - buffer) 必须高于空头出场线
+    (1/n + buffer), 即 buffer < 0.5 - 1/n; buffer=0 总是合法。"""
+    max_buffer = 0.5 - 1.0 / n_quantiles
+    if buffer < 0 or (buffer > 0 and buffer >= max_buffer):
+        raise ValueError(
+            f"buffer 必须在 [0, {max_buffer:.4f}) 之间, 否则多空两条出场线会交叉"
+        )
+
+
+def _exit_quantiles(buffer: float, n_quantiles: int) -> tuple[float, float]:
+    """多头/空头留任阈值对应的截面分位点。用跟 qcut 内部相同的
+    np.linspace 算分位, 避免 1 - 1/3 这类写法跟 linspace 差最后一位浮点,
+    导致 buffer=0 时边界判断跟 qcut 不一致。"""
+    edges = np.linspace(0, 1, n_quantiles + 1)
+    return edges[-2] - buffer, edges[1] + buffer
 
 
 def quantile_long_short(
@@ -95,6 +114,90 @@ def quantile_long_short(
     score = score.dropna()
 
     return score.groupby(level=date_level, group_keys=False).apply(_weight)
+
+
+def buffered_quantile_long_short(
+        *,
+        score       : pd.Series,
+        n_quantiles : int,
+        buffer      : float,
+        date_level  : str = "date",
+) -> pd.Series:
+    """带缓冲带的分位数多空: 进场和出场用两条不同的线, 用来压换手。
+
+    - 进场: 跟 quantile_long_short 一字不差, 当期 qcut 最高组做多、最低组做空
+    - 留任: 上一期已经在多头里的票, 只要本期分数仍高于截面的
+      (1 - 1/n - buffer) 分位点就继续持有; 空头对称, 分数不高于
+      (1/n + buffer) 分位点就继续持有
+    - 本期多头 = 进场集合 ∪ 留任集合, 组内等权归一到 +1, 空头归一到 -1
+
+    所以每条腿的只数是浮动的, 且只会 >= 当期最高/最低组的只数; 缓冲区
+    (比如 60%~80%)只对上期就持有的老票生效, 新票必须够到最高组才能进。
+
+    留任阈值用的是分数的截面分位点(Series.quantile, 线性插值), 跟 qcut
+    内部切边界的方法相同, 所以 buffer=0 时留任集合一定落在进场集合里,
+    结果与 quantile_long_short 逐元素相等(test_sizing 里有回归测试)。
+
+    因为本期持仓依赖上期持仓, 这个函数是按调仓日顺序循环带状态的, 所以
+    score 必须一次性给全所有调仓日(Backtester 本来就是这么调用 sizing_fn 的)。
+
+    Args:
+        score: 调仓日的横截面分数, [date, ticker] MultiIndex。
+        n_quantiles: 分组数, 至少 2。
+        buffer: 缓冲带宽度(截面分位数单位), 0 表示不设缓冲带。必须小于
+            0.5 - 1/n_quantiles, 否则多头出场线会低于空头出场线(五分位
+            下要求 buffer < 0.3)。
+        date_level: 索引里日期所在的 level 名, 默认 "date"。
+
+    Returns:
+        组合权重, 格式与 quantile_long_short 相同: 与 score(去掉 NaN 后)
+        同索引, 中间的票为 0。某天有效股票数不够分组时该天没有输出, 并且
+        持仓状态清空(视为当天空仓, 下一期所有票都按新票处理)。
+
+    Raises:
+        ValueError: n_quantiles 小于 2, 或 buffer 超出允许范围。
+    """
+    if n_quantiles < 2:
+        raise ValueError("n_quantiles 至少为2, 才可以分出多头与空头")
+    _check_buffer(buffer, n_quantiles)
+    long_exit_q, short_exit_q = _exit_quantiles(buffer, n_quantiles)
+
+    score = score.dropna()
+    empty = pd.Index([])
+    prev_long, prev_short = empty, empty
+    pieces = []
+
+    for _, day in score.groupby(level=date_level, sort=True):
+        s = day.droplevel(date_level)
+        if len(s) < n_quantiles:
+            prev_long, prev_short = empty, empty
+            continue
+
+        bucket = pd.qcut(s, n_quantiles, labels=False, duplicates="drop")
+        long_entry = (bucket == bucket.max()).to_numpy()
+        short_entry = (bucket == bucket.min()).to_numpy()
+
+        keep_long = s.index.isin(prev_long) & (s > s.quantile(long_exit_q)).to_numpy()
+        keep_short = s.index.isin(prev_short) & (s <= s.quantile(short_exit_q)).to_numpy()
+
+        # 正常情况下(buffer 合法)留任集合不会跟对面腿的进场集合重叠, 这里
+        # 再兜底一次, 防止大量同分导致 qcut 丢边界时出现一只票两边都在
+        long_mask = long_entry | (keep_long & ~short_entry)
+        short_mask = short_entry | (keep_short & ~long_entry)
+
+        # 赋值顺序跟 quantile_long_short 一致(先多后空), 极端情况下
+        # 全部同分、最高组 == 最低组时, 行为也跟旧函数一样
+        w = pd.Series(0.0, index=day.index)
+        w[long_mask] = 1.0 / long_mask.sum()
+        w[short_mask] = -1.0 / short_mask.sum()
+        pieces.append(w)
+
+        prev_long = s.index[w.to_numpy() > 0]
+        prev_short = s.index[w.to_numpy() < 0]
+
+    if not pieces:
+        return pd.Series(dtype=float)
+    return pd.concat(pieces)
 
 
 def vol_neutral_quantile_long_short(
@@ -187,6 +290,106 @@ def vol_neutral_quantile_long_short(
     return weight[weight != 0.0]
 
 
+def buffered_vol_neutral_quantile_long_short(
+        *,
+        score        : pd.Series,
+        vol          : pd.Series,
+        n_vol_groups : int,
+        n_quantiles  : int,
+        buffer       : float,
+        date_level   : str = "date",
+) -> pd.Series:
+    """vol_neutral_quantile_long_short 的缓冲带版本: 波动率分层不变,
+    每一层内部用 buffered_quantile_long_short 同样的"进场/留任两条线"。
+
+    - 进场: 跟 vol_neutral_quantile_long_short 一字不差, 层内 qcut
+      最高组做多、最低组做空
+    - 留任: 上期在多头里的票, 只要在**本期所在的那一层**里, 分数仍高于
+      层内 (1 - 1/n - buffer) 分位点就继续持有; 空头对称
+    - 所有层的多头合并后等权归一到 +1, 空头归一到 -1
+
+    注意留任看的是本期的层, 不是上期的层: 一只票这个月波动率升高、换到
+    了高波动层, 就要跟高波动层的票比分数。这样保证每一期的多空两腿在
+    各波动率层里的分布依然是对称的, 这正是做波动率中性化的初衷; 如果
+    按上期的层判断, 缓冲带留下的老票会慢慢把波动率暴露带偏。
+
+    本期某一层票数不够 n_quantiles 时, 该层跳过(跟原函数一样), 层内的
+    老票也不留任。buffer=0 时结果与 vol_neutral_quantile_long_short
+    逐元素相等。
+
+    Args:
+        score: 调仓日的横截面分数, [date, ticker] MultiIndex。
+        vol: 调仓日的横截面波动率, 索引结构跟 score 一致, 两者取交集。
+        n_vol_groups: 波动率分几层。
+        n_quantiles: 每层内部按 score 分几组, 至少 2。
+        buffer: 缓冲带宽度, 约束同 buffered_quantile_long_short
+            (buffer < 0.5 - 1/n_quantiles)。
+        date_level: 索引里日期所在的 level 名, 默认 "date"。
+
+    Returns:
+        组合权重, 格式与 vol_neutral_quantile_long_short 相同(不产生 0 行)。
+        某天有效股票数不够分层分组时该天没有输出, 持仓状态清空。
+
+    Raises:
+        ValueError: n_quantiles 小于 2, 或 buffer 超出允许范围。
+    """
+    if n_quantiles < 2:
+        raise ValueError("n_quantiles 至少为2, 才可以分出多头与空头")
+    _check_buffer(buffer, n_quantiles)
+    long_exit_q, short_exit_q = _exit_quantiles(buffer, n_quantiles)
+
+    df = pd.concat(
+        [score.rename("score"), vol.rename("vol")], axis=1, join="inner"
+    ).dropna()
+
+    empty = pd.Index([])
+    prev_long, prev_short = empty, empty
+    pieces = []
+
+    for _, day in df.groupby(level=date_level, sort=True):
+        if len(day) < n_vol_groups * n_quantiles:
+            prev_long, prev_short = empty, empty
+            continue
+
+        tickers = day.index.droplevel(date_level)
+        held_long = tickers.isin(prev_long)
+        held_short = tickers.isin(prev_short)
+
+        vol_bucket = pd.qcut(day["vol"], n_vol_groups, labels=False, duplicates="drop")
+        long_mask = np.zeros(len(day), dtype=bool)
+        short_mask = np.zeros(len(day), dtype=bool)
+
+        for layer in np.unique(vol_bucket.to_numpy()):
+            pos = np.flatnonzero(vol_bucket.to_numpy() == layer)
+            layer_score = day["score"].iloc[pos]
+            if len(layer_score) < n_quantiles:
+                continue
+
+            bucket = pd.qcut(layer_score, n_quantiles, labels=False, duplicates="drop")
+            long_entry = (bucket == bucket.max()).to_numpy()
+            short_entry = (bucket == bucket.min()).to_numpy()
+            keep_long = held_long[pos] & (layer_score > layer_score.quantile(long_exit_q)).to_numpy()
+            keep_short = held_short[pos] & (layer_score <= layer_score.quantile(short_exit_q)).to_numpy()
+
+            long_mask[pos] |= long_entry | (keep_long & ~short_entry)
+            short_mask[pos] |= short_entry | (keep_short & ~long_entry)
+
+        w = pd.Series(0.0, index=day.index)
+        if long_mask.sum():
+            w[long_mask] = 1.0 / long_mask.sum()
+        if short_mask.sum():
+            w[short_mask] = -1.0 / short_mask.sum()
+        pieces.append(w)
+
+        prev_long = tickers[w.to_numpy() > 0]
+        prev_short = tickers[w.to_numpy() < 0]
+
+    if not pieces:
+        return pd.Series(dtype=float)
+    weight = pd.concat(pieces)
+    return weight[weight != 0.0]
+
+
 def make_quantile_sizer(*, n_quantiles: int):
     """返回一个 (score, price) -> weight 的"仓位构造函数", 内部就是包了一层
     quantile_long_short, 可以直接传给 Backtester(sizing_fn=...)。
@@ -209,6 +412,34 @@ def make_quantile_sizer(*, n_quantiles: int):
     """
     def _sizer(score: pd.Series, price: pd.DataFrame) -> pd.Series:
         return quantile_long_short(score=score, n_quantiles=n_quantiles)
+
+    return _sizer
+
+
+def make_buffered_quantile_sizer(*, n_quantiles: int, buffer: float):
+    """跟 make_quantile_sizer 同一种接口, 内部包的是
+    buffered_quantile_long_short(带缓冲带的分位数多空), 用法:
+
+        Backtester(..., sizing_fn=make_buffered_quantile_sizer(n_quantiles=5, buffer=0.1))
+
+    buffer=0 时行为与 make_quantile_sizer 完全相同。price 参数用不上,
+    只是为了保持统一签名。
+
+    Args:
+        n_quantiles: 分组数, 透传给 buffered_quantile_long_short。
+        buffer: 缓冲带宽度, 透传给 buffered_quantile_long_short。
+
+    Returns:
+        Callable[[pd.Series, pd.DataFrame], pd.Series]。
+    """
+    # 构造时就校验一次参数, 不用等到跑完因子才报错
+    if n_quantiles >= 2:
+        _check_buffer(buffer, n_quantiles)
+
+    def _sizer(score: pd.Series, price: pd.DataFrame) -> pd.Series:
+        return buffered_quantile_long_short(
+            score=score, n_quantiles=n_quantiles, buffer=buffer
+        )
 
     return _sizer
 
@@ -236,6 +467,41 @@ def make_vol_neutral_sizer(*, n_vol_groups: int, n_quantiles: int, vol_window: i
         vol = vol[vol.index.isin(score.index)]
         return vol_neutral_quantile_long_short(
             score=score, vol=vol, n_vol_groups=n_vol_groups, n_quantiles=n_quantiles
+        )
+
+    return _sizer
+
+
+def make_buffered_vol_neutral_sizer(
+    *, n_vol_groups: int, n_quantiles: int, buffer: float, vol_window: int = 21
+):
+    """跟 make_vol_neutral_sizer 同一种接口, 内部包的是
+    buffered_vol_neutral_quantile_long_short(波动率分层 + 层内缓冲带):
+
+        Backtester(..., sizing_fn=make_buffered_vol_neutral_sizer(
+            n_vol_groups=5, n_quantiles=5, buffer=0.1))
+
+    波动率的算法跟 make_vol_neutral_sizer 完全一样, buffer=0 时两者结果
+    相同。
+
+    Args:
+        n_vol_groups: 波动率分几层。
+        n_quantiles: 每层内部按 score 分几组。
+        buffer: 缓冲带宽度, 约束同 buffered_quantile_long_short。
+        vol_window: 算已实现波动率用的滚动窗口(交易日数), 默认 21。
+
+    Returns:
+        Callable[[pd.Series, pd.DataFrame], pd.Series]。
+    """
+    if n_quantiles >= 2:
+        _check_buffer(buffer, n_quantiles)
+
+    def _sizer(score: pd.Series, price: pd.DataFrame) -> pd.Series:
+        vol = realized_volatility(price, window=vol_window)
+        vol = vol[vol.index.isin(score.index)]
+        return buffered_vol_neutral_quantile_long_short(
+            score=score, vol=vol, n_vol_groups=n_vol_groups,
+            n_quantiles=n_quantiles, buffer=buffer,
         )
 
     return _sizer

@@ -1,0 +1,11 @@
+name: close_location
+description: 前一日收盘在当日高低区间中的位置, 0 为最低价、1 为最高价
+steps:
+  - {id: c, op: shift, input: {ref: close}, by: {const: 1}}
+  - {id: h, op: shift, input: {ref: high}, by: {const: 1}}
+  - {id: l, op: shift, input: {ref: low}, by: {const: 1}}
+  - {id: above_low, op: subtract, a: {ref: c}, b: {ref: l}}
+  - {id: span, op: subtract, a: {ref: h}, b: {ref: l}}
+  - {id: safe_span, op: add, a: {ref: span}, b: {const: 1.0e-12}}
+  - {id: result, op: divide, a: {ref: above_low}, b: {ref: safe_span}}
+output: result

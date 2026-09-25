@@ -1,0 +1,8 @@
+name: relative_volume
+description: 前一日成交量除以截至前一日的 window 日平均成交量
+params: [window]
+steps:
+  - {id: v, op: shift, input: {ref: volume}, by: {const: 1}}
+  - {id: avg, op: rolling_mean, input: {ref: v}, window: {param: window}}
+  - {id: result, op: divide, a: {ref: v}, b: {ref: avg}}
+output: result

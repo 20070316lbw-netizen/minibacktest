@@ -1,0 +1,10 @@
+name: kbar_lower_shadow
+description: 前一日下影线长度除以复权开盘价，方向与 qlib KLOW 相同
+steps:
+  - {id: o, op: shift, input: {ref: open}, by: {const: 1}}
+  - {id: c, op: shift, input: {ref: close}, by: {const: 1}}
+  - {id: l, op: shift, input: {ref: low}, by: {const: 1}}
+  - {id: body_bottom, op: elementwise_min, a: {ref: o}, b: {ref: c}}
+  - {id: shadow, op: subtract, a: {ref: body_bottom}, b: {ref: l}}
+  - {id: result, op: divide, a: {ref: shadow}, b: {ref: o}}
+output: result

@@ -1,0 +1,10 @@
+name: realized_volatility
+description: 截至前一日的 window 日日收益标准差
+params: [window]
+steps:
+  - {id: c, op: shift, input: {ref: close}, by: {const: 1}}
+  - {id: prev, op: shift, input: {ref: c}, by: {const: 1}}
+  - {id: ratio, op: divide, a: {ref: c}, b: {ref: prev}}
+  - {id: ret, op: subtract, a: {ref: ratio}, b: {const: 1}}
+  - {id: result, op: rolling_std, input: {ref: ret}, window: {param: window}}
+output: result

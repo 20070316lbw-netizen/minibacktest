@@ -1,0 +1,14 @@
+name: return_volume_corr
+description: 截至前一日的 window 日收益与成交量变化的滚动相关系数
+params: [window]
+steps:
+  - {id: c, op: shift, input: {ref: close}, by: {const: 1}}
+  - {id: prev_c, op: shift, input: {ref: c}, by: {const: 1}}
+  - {id: price_ratio, op: divide, a: {ref: c}, b: {ref: prev_c}}
+  - {id: ret, op: subtract, a: {ref: price_ratio}, b: {const: 1}}
+  - {id: v, op: shift, input: {ref: volume}, by: {const: 1}}
+  - {id: prev_v, op: shift, input: {ref: v}, by: {const: 1}}
+  - {id: volume_ratio, op: divide, a: {ref: v}, b: {ref: prev_v}}
+  - {id: volume_change, op: subtract, a: {ref: volume_ratio}, b: {const: 1}}
+  - {id: result, op: rolling_corr, a: {ref: ret}, b: {ref: volume_change}, window: {param: window}}
+output: result

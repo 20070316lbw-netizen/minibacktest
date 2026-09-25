@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from minibacktest.factors.registry import (
     ALLOWED_OPS,
+    BUILTIN_FIELDS,
     BUILTIN_REF,
     EXTRA_DIRS_ENV_VAR,
     OP_FIELDS,
@@ -21,11 +22,13 @@ from minibacktest.factors.registry import (
     factor_dirs,
     get,
     load_specs,
+    required_fields,
     validate_spec,
 )
 
 __all__ = [
     "ALLOWED_OPS",
+    "BUILTIN_FIELDS",
     "BUILTIN_REF",
     "EXTRA_DIRS_ENV_VAR",
     "OP_FIELDS",
@@ -35,5 +38,6 @@ __all__ = [
     "factor_dirs",
     "get",
     "load_specs",
+    "required_fields",
     "validate_spec",
 ]

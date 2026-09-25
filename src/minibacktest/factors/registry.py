@@ -56,6 +56,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -64,9 +65,9 @@ FactorFn = Callable[..., pd.Series]
 _FACTORS_DIR = Path(__file__).parent
 
 # op -> 需要的操作数字段名。新增 op 时同时更新这里和 _apply_op。
-_BINARY_OPS = frozenset({"add", "subtract", "multiply", "divide"})
-_ROLLING_OPS = frozenset({"rolling_mean", "rolling_std", "rolling_min", "rolling_max"})
-ALLOWED_OPS = _BINARY_OPS | _ROLLING_OPS | {"shift", "cross_section_rank"}
+_BINARY_OPS = frozenset({"add", "subtract", "multiply", "divide", "elementwise_max", "elementwise_min"})
+_ROLLING_OPS = frozenset({"rolling_mean", "rolling_std", "rolling_min", "rolling_max", "rolling_sum"})
+ALLOWED_OPS = _BINARY_OPS | _ROLLING_OPS | {"shift", "cross_section_rank", "rolling_corr"}
 _ALLOWED_OPS = ALLOWED_OPS  # 旧名字, 保留给已有调用方
 
 # 每种 op 需要哪些操作数字段(按顺序)。
@@ -74,13 +75,16 @@ OP_FIELDS: dict[str, tuple[str, ...]] = {
     **{op: ("a", "b") for op in sorted(_BINARY_OPS)},
     "shift": ("input", "by"),
     **{op: ("input", "window") for op in sorted(_ROLLING_OPS)},
+    "rolling_corr": ("a", "b", "window"),
     "cross_section_rank": ("input",),
 }
 
 MAX_ROLLING_WINDOW = 512
 
-# 内置引用: 整张价格宽表。step id 不能跟它撞名。
+# 内置引用: price/close 均为复权收盘价；其余字段通过 fields 传入。
 BUILTIN_REF = "price"
+BUILTIN_FIELDS = frozenset({"open", "high", "low", "close", "volume"})
+BUILTIN_REFS = {BUILTIN_REF, *BUILTIN_FIELDS}
 
 EXTRA_DIRS_ENV_VAR = "MINIBACKTEST_EXTRA_FACTOR_DIRS"
 
@@ -175,7 +179,7 @@ def _check_operand(
         if value not in known_ids:
             raise FactorSpecError(
                 f"因子 {factor_name!r} {where} 引用了不存在(或还没算出来)的 id {value!r}, "
-                f"只能引用 {BUILTIN_REF!r} 或排在前面的步骤: {sorted(known_ids)}"
+                f"只能引用内置行情字段或排在前面的步骤: {sorted(known_ids)}"
             )
     else:
         raise FactorSpecError(
@@ -187,8 +191,8 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
     """只看结构、不碰数据的静态校验, 编译时(也就是扫描注册表时)就把写错的 YAML 拦下来。
 
     检查: 顶层是字典; params 是不重复的字符串列表; 每一步有唯一 id(不跟
-    "price" 撞名)、op 在白名单里、字段齐全且没有多余字段; 操作数形状正确,
-    param 已声明, ref 只能指向 "price" 或前面的步骤(所以不可能成环);
+    内置行情字段撞名)、op 在白名单里、字段齐全且没有多余字段; 操作数形状正确,
+    param 已声明, ref 只能指向行情字段或前面的步骤(所以不可能成环);
     shift/滚动/截面排名的 input 必须是 ref; 常数位移必须是非负整数,
     滚动窗口必须是 1~512 的整数; output 指向存在的步骤。
 
@@ -209,6 +213,8 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
         raise FactorSpecError(f"因子 {factor_name!r} 的 params 必须是参数名字符串列表: {declared_params!r}")
     if len(set(declared_params)) != len(declared_params):
         raise FactorSpecError(f"因子 {factor_name!r} 的 params 里有重复的参数名: {declared_params!r}")
+    if "fields" in declared_params:
+        raise FactorSpecError(f"因子 {factor_name!r} 的参数名 'fields' 已保留给行情字段")
 
     steps = spec.get("steps")
     if steps is None and partial:
@@ -216,7 +222,7 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
     if not isinstance(steps, list) or (not steps and not partial):
         raise FactorSpecError(f"因子 {factor_name!r} 缺 steps(或者 steps 不是一个列表)")
 
-    known_ids = {BUILTIN_REF}
+    known_ids = set(BUILTIN_REFS)
     for i, step in enumerate(steps):
         if not isinstance(step, dict) or "id" not in step:
             raise FactorSpecError(f"因子 {factor_name!r} 有一步没写 id: {step!r}")
@@ -224,7 +230,7 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
         if not isinstance(step_id, str) or not step_id:
             raise FactorSpecError(f"因子 {factor_name!r} 第 {i + 1} 步的 id 必须是非空字符串: {step_id!r}")
         if step_id in known_ids:
-            raise FactorSpecError(f"因子 {factor_name!r} 里 id {step_id!r} 重复了(或者跟内置的 'price' 撞名)")
+            raise FactorSpecError(f"因子 {factor_name!r} 里 id {step_id!r} 重复了(或者跟内置行情字段撞名)")
         op = step.get("op")
         if op not in ALLOWED_OPS:
             raise FactorSpecError(f"因子 {factor_name!r} 用了不在白名单里的 op {op!r}, 只认 {sorted(ALLOWED_OPS)}")
@@ -245,9 +251,11 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
             )
         if (op == "shift" or op in _ROLLING_OPS or op == "cross_section_rank") and "ref" not in step["input"]:
             raise FactorSpecError(f"因子 {factor_name!r} 的 {op} 步骤 {step_id!r} 的 input 必须是 {{ref: ...}}")
+        if op == "rolling_corr" and ("ref" not in step["a"] or "ref" not in step["b"]):
+            raise FactorSpecError(f"因子 {factor_name!r} 的 rolling_corr 输入 a/b 必须是 {{ref: ...}}")
         if op == "shift" and "const" in step["by"]:
             _shift_amount(step["by"]["const"], factor_name=factor_name)
-        if op in _ROLLING_OPS:
+        if op in _ROLLING_OPS or op == "rolling_corr":
             if "ref" in step["window"]:
                 raise FactorSpecError(f"因子 {factor_name!r} 的 {op} 步骤 {step_id!r} 的 window 只接受 const 或 param")
             if "const" in step["window"]:
@@ -259,7 +267,7 @@ def validate_spec(spec: Any, *, factor_name: str, partial: bool = False) -> None
         return
     if not output_id:
         raise FactorSpecError(f"因子 {factor_name!r} 缺 output(要指明哪一步是最终结果)")
-    if output_id not in known_ids:
+    if output_id not in known_ids - BUILTIN_REFS:
         raise FactorSpecError(f"因子 {factor_name!r} 的 output {output_id!r} 找不到对应的 step id")
 
 
@@ -304,9 +312,20 @@ def _apply_op(step: dict[str, Any], env: dict[str, Any], params: Mapping[str, An
             return rolling.mean()
         if op == "rolling_std":
             return rolling.std()
+        if op == "rolling_sum":
+            return rolling.sum()
         if op == "rolling_min":
             return rolling.min()
         return rolling.max()  # rolling_max
+
+    if op == "rolling_corr":
+        a = _resolve_operand(step["a"], env, params, factor_name=factor_name)
+        b = _resolve_operand(step["b"], env, params, factor_name=factor_name)
+        if not isinstance(a, pd.DataFrame) or not isinstance(b, pd.DataFrame):
+            raise FactorSpecError(f"因子 {factor_name!r} 的 rolling_corr 输入必须是宽表")
+        window = _rolling_window(_resolve_operand(step["window"], env, params, factor_name=factor_name),
+                                 factor_name=factor_name)
+        return a.rolling(window=window, min_periods=window).corr(b)
 
     if "a" not in step or "b" not in step:
         raise FactorSpecError(f"因子 {factor_name!r} 的 {op} 步骤缺 a 或 b: {step!r}")
@@ -318,6 +337,10 @@ def _apply_op(step: dict[str, Any], env: dict[str, Any], params: Mapping[str, An
         return a - b
     if op == "multiply":
         return a * b
+    if op == "elementwise_max":
+        return np.maximum(a, b)
+    if op == "elementwise_min":
+        return np.minimum(a, b)
     return a / b  # op == "divide"
 
 
@@ -347,11 +370,14 @@ def _compile(spec: dict[str, Any], *, factor_name: str) -> FactorFn:
     steps = spec["steps"]
     output_id = spec["output"]
 
-    def fn(price: pd.DataFrame, **params: Any) -> pd.Series:
+    needed_fields = _required_fields_from_spec(spec)
+
+    def fn(price: pd.DataFrame, *, fields: Mapping[str, pd.DataFrame] | None = None, **params: Any) -> pd.Series:
         """按 steps 顺序依次算出每一步, 最后把 output 那一步 stack 成长表。
 
         Args:
-            price: 价格宽表, index 是日期, columns 是 ticker。
+            price: 复权收盘价宽表, index 是日期, columns 是 ticker。
+            fields: 可选的 open/high/low/volume 宽表，必须与 price 完全对齐。
             **params: 这个因子声明的参数(必须是 declared_params 的子集)。
 
         Returns:
@@ -365,14 +391,25 @@ def _compile(spec: dict[str, Any], *, factor_name: str) -> FactorFn:
         extra = set(params) - set(declared_params)
         if extra:
             raise FactorSpecError(f"因子 {factor_name!r} 不认识参数 {sorted(extra)}, 只声明了 {declared_params}")
+        provided_fields = fields if fields is not None else {}
+        missing = needed_fields - set(provided_fields)
+        if missing:
+            raise FactorSpecError(f"因子 {factor_name!r} 缺少行情字段 {sorted(missing)}")
 
-        env: dict[str, Any] = {"price": price}
+        env: dict[str, Any] = {"price": price, "close": price}
+        if fields is not None:
+            for field, values in fields.items():
+                if field not in BUILTIN_FIELDS - {"close"}:
+                    raise FactorSpecError(f"因子 {factor_name!r} 收到不支持的行情字段 {field!r}")
+                if not isinstance(values, pd.DataFrame) or not values.index.equals(price.index) or not values.columns.equals(price.columns):
+                    raise FactorSpecError(f"因子 {factor_name!r} 的 {field!r} 宽表必须与 price 的日期、标的完全对齐")
+                env[field] = values
         for step in steps:
             if not isinstance(step, dict) or "id" not in step:
                 raise FactorSpecError(f"因子 {factor_name!r} 有一步没写 id: {step!r}")
             step_id = step["id"]
-            if step_id == "price" or step_id in env:
-                raise FactorSpecError(f"因子 {factor_name!r} 里 id {step_id!r} 重复了(或者跟内置的 'price' 撞名)")
+            if step_id in env:
+                raise FactorSpecError(f"因子 {factor_name!r} 里 id {step_id!r} 重复了(或者跟内置行情字段撞名)")
             env[step_id] = _apply_op(step, env, params, factor_name=factor_name)
 
         if output_id not in env:
@@ -384,6 +421,25 @@ def _compile(spec: dict[str, Any], *, factor_name: str) -> FactorFn:
         return s.rename(factor_name)  # type: ignore[return-value]
 
     return fn
+
+
+def _required_fields_from_spec(spec: dict[str, Any]) -> set[str]:
+    return {
+        operand["ref"]
+        for step in spec["steps"]
+        for field in OP_FIELDS[step["op"]]
+        if (operand := step[field]).get("ref") in BUILTIN_FIELDS - {"close"}
+    }
+
+
+def required_fields(name: str) -> set[str]:
+    """返回指定因子直接引用的额外行情字段（close/price 已由 price 提供）。"""
+    specs = load_specs()
+    if name not in specs:
+        raise KeyError(f"没有注册名为 {name!r} 的因子")
+    spec = specs[name][1]
+    validate_spec(spec, factor_name=name)
+    return _required_fields_from_spec(spec)
 
 
 def factor_dirs(extra_dirs: list[str | Path] | None = None) -> list[Path]:

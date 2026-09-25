@@ -1,0 +1,8 @@
+name: kbar_mid
+description: 前一日复权收盘与开盘的涨幅，方向与 qlib KMID 相同
+steps:
+  - {id: o, op: shift, input: {ref: open}, by: {const: 1}}
+  - {id: c, op: shift, input: {ref: close}, by: {const: 1}}
+  - {id: body, op: subtract, a: {ref: c}, b: {ref: o}}
+  - {id: result, op: divide, a: {ref: body}, b: {ref: o}}
+output: result

@@ -153,14 +153,20 @@ output: result
 ```
 
 每一步有 `id`（后面的步骤靠 `{ref: 这个 id}` 引用它）和 `op`（支持四则运算、
-`shift`、`rolling_mean`/`rolling_std`/`rolling_min`/`rolling_max`、`cross_section_rank`），操作数只有
+`shift`、滚动统计、逐元素最大/最小值、滚动相关、`cross_section_rank`），操作数只有
 三种写法：`{const: 数字}`、`{param: 参数名}`（从调用时的 `**kwargs` 里取）、
-`{ref: 前面某一步的 id, 或者内置的 "price"}`（`price` 指向传进来的整张价格
-宽表）。`output` 指明哪一步是最终结果。`momentum`/`reversal` 两个因子都已经
+`{ref: 前面某一步的 id, 或者内置行情字段}`。`price`/`close` 都指向复权收盘价；
+`open`/`high`/`low` 是同口径复权价格，`volume` 是数据库中的成交量。
+`output` 指明哪一步是最终结果。`momentum`/`reversal` 两个因子都已经
 迁移成这种格式（等价的原始 Python 写法留在各自 YAML 文件的注释里，方便对照）。
 
 新增一个因子：在这个目录下新建一个 `<名字>.yaml`，参照 `momentum.yaml` 的格式
 写，不用碰任何 `.py` 文件，也不用改 `registry.py` 或者 `Backtester`。
+
+多字段因子由 `Backtester` 按需读取行情字段；直接调用 `get(name)` 时，除
+`price` 外的字段要通过 `fields={"open": ..., "high": ..., ...}` 传入，且宽表
+日期与标的必须和 `price` 完全对齐。首批新增了 9 个 K 线、量价和波动因子，
+具体口径、数据核查结果及用法见 [因子与行情字段说明](docs/factors.md)。
 
 ## 图表文字用英文
 
@@ -214,8 +220,10 @@ MCP 工具，试算和回测跑在带 CPU/内存上限 + 墙钟超时的子进�
 - 公开 `compile_spec` / `load_specs` / `factor_dirs` / `ALLOWED_OPS` / `OP_FIELDS`,
   外部调用方不用再碰下划线开头的私有函数。
 
-词表已增加四种滚动运算和同日横截面排名：滚动运算使用 `input: {ref: ...}`
+词表支持滚动均值、标准差、最大、最小、求和以及同日横截面排名：普通滚动运算使用 `input: {ref: ...}`
 与 `window: {const: 整数}` 或 `{param: 参数名}`，窗口限 1~512 个交易日，
 需要完整窗口才产出值；`cross_section_rank` 只需 `input`，每天对非空标的做
 升序百分位排名，空值和无穷值不参与排名。滚动计算包含当日及过去的数据，不读取未来行。
-`quant-assistant` 的草稿工具支持这些 op，且能试算尚未设置 output 的中间步骤。
+`rolling_corr` 使用 `a`、`b` 两个宽表引用和 `window`；`elementwise_max`/
+`elementwise_min` 使用 `a`、`b` 两个操作数。`quant-assistant` 草稿工具对新增
+字段和运算的支持需要另行同步。

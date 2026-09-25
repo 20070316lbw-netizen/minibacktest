@@ -24,6 +24,7 @@ from minibacktest.base import Result
 from minibacktest.engine import run_backtest
 from minibacktest.evaluation.quantile import quantile_forward_returns
 from minibacktest.figure_engine import plot_tearsheet
+from minibacktest.market_data import load_factor_fields
 from minibacktest.portfolio.sizing import make_quantile_sizer
 from minibacktest.rebalance import rebalance_dates
 from minibacktest.signal.combine import combine_scores
@@ -43,7 +44,7 @@ class Backtester:
         n_quantiles: int = 5,
         initial_capital: float = 100_000.0,
         periods_per_year: float = 252,
-        db_path: str = "sp500.db",
+        db_path: str = "data/sp500.db",
         commission_bps: float = 0.0,
         slippage_bps: float = 0.0,
         sizing_fn: Callable[[pd.Series, pd.DataFrame], pd.Series] | None = None,
@@ -69,6 +70,7 @@ class Backtester:
         self.sizing_fn = sizing_fn or make_quantile_sizer(n_quantiles=n_quantiles)
 
         self.price: pd.DataFrame | None = None  # run() 之后: adj_close 宽表
+        self.factor_fields: dict[str, pd.DataFrame] = {}  # 按需读取的复权 OHLC / 原始成交量
         self.score: pd.Series | None = None  # run() 之后: 调仓日打分(多因子合成后)
         self.weight: pd.Series | None = None  # run() 之后: 调仓日目标权重
         self.result: Result | None = None  # run() 之后: base.Result
@@ -108,7 +110,7 @@ class Backtester:
         columns = []
         for name, params in self.factor_specs:
             fn = factor_registry.get(name)
-            s = fn(self.price, **params).rename(name)
+            s = fn(self.price, fields=self.factor_fields, **params).rename(name)
             s = s[s.index.get_level_values("date").isin(rb_dates)]
             columns.append(s)
 
@@ -133,6 +135,17 @@ class Backtester:
         if refresh_data:
             self._pull_and_store()
         self.price = self._load_price()
+        needed = set().union(*(factor_registry.required_fields(name) for name, _ in self.factor_specs))
+        self.factor_fields = (
+            load_factor_fields(
+                db_path=self.db_path,
+                tickers=self.tickers,
+                start=self.start,
+                end=self.end,
+                adjusted_close=self.price,
+            )
+            if needed else {}
+        )
         self.score, self.weight = self._build_score()
         self.result = run_backtest(
             price=self.price,
